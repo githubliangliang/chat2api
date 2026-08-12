@@ -19,7 +19,7 @@ http://127.0.0.1:8081/login
 重启/重建：
 
 ```bash
-cd sub2api_new/deploy
+cd sub2api/deploy
 docker compose -f docker-compose.sqlite.yml --env-file .env.sqlite up -d --build
 docker compose -f docker-compose.sqlite.yml --env-file .env.sqlite logs -f
 ```
@@ -70,7 +70,7 @@ docker compose -f docker-compose.sqlite.yml --env-file .env.sqlite logs -f
 1. **在电脑上编译**（不要在 1G 机器上 build）：
 
 ```bash
-cd sub2api_new
+cd sub2api
 cd frontend && pnpm install && pnpm build && cd ..
 cd backend
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags embed -ldflags="-s -w" -o ../sub2api ./cmd/server

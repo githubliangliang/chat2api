@@ -1,6 +1,6 @@
-# sub2api_new 重构说明
+# sub2api 重构说明
 
-按根目录 `new.txt` 要求，在 `sub2api/` 基础上重构到 `sub2api_new/`：
+按根目录 `new.txt` 要求，在上游 Sub2API 基础上于本仓库重构：
 
 1. **支持 SQLite 与 PostgreSQL，Redis 非必须**
 2. **菜单可隐藏**（含独立「菜单管理」页面）
@@ -214,7 +214,7 @@ docker compose -f docker-compose.build.yml --env-file .env up -d --build
 
 ## 变更范围摘要
 
-- 复制上游 `sub2api` → `sub2api_new`（不含 `.git`）
+- 基于上游 Sub2API 源码（不含上游 `.git`）
 - 配置 / 仓储 / 安装向导：双数据库 + 可选 Redis
 - 设置系统 + 独立菜单管理页 + 侧栏过滤
 - `deploy/config.example.yaml`、`deploy/.env.example` 文档同步
@@ -222,7 +222,7 @@ docker compose -f docker-compose.build.yml --env-file .env up -d --build
 ## 关键文件索引
 
 ```
-sub2api_new/
+sub2api/
 ├── REFACTOR.md                          # 本文档
 ├── deploy/config.example.yaml           # driver/path、redis.enabled
 ├── deploy/.env.example                  # DATABASE_DRIVER、REDIS_ENABLED

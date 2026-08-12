@@ -1,4 +1,4 @@
-# 本地启动指南（sub2api_new）
+# 本地启动指南（sub2api）
 
 ## 登录页
 
@@ -17,7 +17,7 @@
 无需 PostgreSQL / Redis，一条命令构建并启动。
 
 ```bash
-cd /media/liang/工作/work_space/idea/github_code/change/sub2api_new/deploy
+cd sub2api/deploy
 
 # 1. 环境变量
 cp .env.sqlite.example .env.sqlite
@@ -64,7 +64,7 @@ docker compose -f docker-compose.sqlite.yml --env-file .env.sqlite up -d --build
 ## 完整栈：PostgreSQL + Redis + 本地构建
 
 ```bash
-cd /media/liang/工作/work_space/idea/github_code/change/sub2api_new/deploy
+cd sub2api/deploy
 
 cp .env.example .env
 # 必填：POSTGRES_PASSWORD、ADMIN_PASSWORD、JWT_SECRET
