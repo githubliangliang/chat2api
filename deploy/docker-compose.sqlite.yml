@@ -1,0 +1,93 @@
+# =============================================================================
+# Sub2API — SQLite + 嵌入式 Redis（本地可运行，含 sub2api_new 重构）
+# =============================================================================
+# 特点：
+#   - 从仓库根 Dockerfile 本地构建（含菜单管理等改动）
+#   - 单容器，无需 PostgreSQL / Redis 依赖
+#   - 数据落在 ./data（SQLite 文件 + config.yaml）
+#
+# 启动：
+#   cd deploy
+#   cp .env.sqlite.example .env.sqlite   # 首次
+#   docker compose -f docker-compose.sqlite.yml --env-file .env.sqlite up -d --build
+#
+# 访问：
+#   http://localhost:8080
+#   默认管理员见 .env.sqlite（ADMIN_EMAIL / ADMIN_PASSWORD）
+#
+# 停止：
+#   docker compose -f docker-compose.sqlite.yml --env-file .env.sqlite down
+# =============================================================================
+
+services:
+  sub2api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        # 国内构建可保留默认 goproxy；海外可改为 https://proxy.golang.org,direct
+        GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
+        GOSUMDB: ${GOSUMDB:-sum.golang.google.cn}
+    image: sub2api-new:local
+    container_name: sub2api-new-sqlite
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "${BIND_HOST:-0.0.0.0}:${SERVER_PORT:-8080}:8080"
+    volumes:
+      # 持久化：config.yaml、SQLite、上传等
+      - ./data:/app/data
+    environment:
+      # 首次自动安装
+      - AUTO_SETUP=true
+      - DATA_DIR=/app/data
+
+      # 服务
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=8080
+      - SERVER_MODE=${SERVER_MODE:-release}
+      - RUN_MODE=${RUN_MODE:-standard}
+      - TZ=${TZ:-Asia/Shanghai}
+
+      # 数据库：SQLite（重构能力）
+      - DATABASE_DRIVER=sqlite
+      - DATABASE_PATH=/app/data/sub2api.db
+      - DATABASE_MAX_OPEN_CONNS=4
+      - DATABASE_MAX_IDLE_CONNS=4
+
+      # Redis：关闭外部 Redis，使用进程内嵌入式（重构能力）
+      - REDIS_ENABLED=false
+
+      # 管理员（首次 AUTO_SETUP 创建）
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@sub2api.local}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123456}
+
+      # 会话密钥（建议固定，否则重建容器后需重新登录）
+      - JWT_SECRET=${JWT_SECRET:-please-change-me-use-openssl-rand-hex-32}
+      - JWT_EXPIRE_HOUR=${JWT_EXPIRE_HOUR:-24}
+      - TOTP_ENCRYPTION_KEY=${TOTP_ENCRYPTION_KEY:-}
+
+      # 安装阶段迁移超时（秒，0=默认）
+      - SETUP_MIGRATION_TIMEOUT_SECONDS=${SETUP_MIGRATION_TIMEOUT_SECONDS:-120}
+
+      # URL 白名单：本地试用默认放宽
+      - SECURITY_URL_ALLOWLIST_ENABLED=${SECURITY_URL_ALLOWLIST_ENABLED:-false}
+      - SECURITY_URL_ALLOWLIST_ALLOW_INSECURE_HTTP=${SECURITY_URL_ALLOWLIST_ALLOW_INSECURE_HTTP:-true}
+      - SECURITY_URL_ALLOWLIST_ALLOW_PRIVATE_HOSTS=${SECURITY_URL_ALLOWLIST_ALLOW_PRIVATE_HOSTS:-true}
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "-q",
+          "-T",
+          "5",
+          "-O",
+          "/dev/null",
+          "http://localhost:8080/health",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s

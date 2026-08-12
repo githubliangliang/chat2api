@@ -1,0 +1,76 @@
+# =============================================================================
+# 个人自用精简配置（1C1G / 无 Docker / SQLite / 无外部 Redis）
+# 用法：复制到数据目录，例如 /opt/sub2api/data/config.yaml
+# 修改 jwt.secret、admin 密码后再启动
+# =============================================================================
+
+# simple：弱化 SaaS 计费/分组等，个人自用更合适
+run_mode: "simple"
+
+server:
+  host: "0.0.0.0"
+  port: 8080
+  mode: "release"
+  # 降低连接与头大小占用（个人够用）
+  read_header_timeout: 10
+  idle_timeout: 60
+  max_request_body_size: 33554432   # 32MB，够普通对话；大文件再调大
+  h2c:
+    enabled: false
+
+database:
+  driver: "sqlite"
+  path: "/opt/sub2api/data/sub2api.db"
+  max_open_conns: 2
+  max_idle_conns: 2
+  conn_max_lifetime_minutes: 30
+  conn_max_idle_time_minutes: 5
+  # 个人用关掉配额 flusher
+  user_platform_quota_flusher_enabled: false
+
+redis:
+  enabled: false
+  host: ""
+  port: 6379
+  dial_timeout_seconds: 5
+  read_timeout_seconds: 3
+  write_timeout_seconds: 3
+  pool_size: 8
+  min_idle_conns: 0
+
+# 关掉运维监控后台任务（定时采集/聚合/告警，省 CPU/内存）
+ops:
+  enabled: false
+  use_preaggregated_tables: false
+  cleanup:
+    enabled: false
+  aggregation:
+    enabled: false
+  metrics_collector_cache:
+    enabled: false
+
+# 批量生图队列默认关
+batch_image:
+  enabled: false
+  queue_enabled: false
+
+jwt:
+  secret: "CHANGE_ME_openssl_rand_hex_32"
+  expire_hour: 168
+
+timezone: "Asia/Shanghai"
+
+default:
+  admin_email: "admin@example.com"
+  admin_password: "CHANGE_ME_STRONG_PASSWORD"
+  user_concurrency: 3
+  user_balance: 0
+  api_key_prefix: "sk-"
+  rate_multiplier: 1.0
+
+log:
+  level: "warn"   # 个人用可 info/warn，少打日志也省一点 IO
+
+# 网关侧可按需再收紧（示例：不要开过大的并发池）
+# gateway:
+#   concurrency_slot_ttl_minutes: 30

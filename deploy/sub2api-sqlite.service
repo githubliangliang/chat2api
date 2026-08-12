@@ -1,0 +1,38 @@
+[Unit]
+Description=Sub2API (SQLite, no external Redis)
+Documentation=https://github.com/Wei-Shaw/sub2api
+After=network.target
+# 不依赖 postgresql / redis
+
+[Service]
+Type=simple
+User=sub2api
+Group=sub2api
+WorkingDirectory=/opt/sub2api
+
+# 数据目录：config.yaml + sqlite
+Environment=DATA_DIR=/opt/sub2api/data
+Environment=GIN_MODE=release
+Environment=SERVER_HOST=0.0.0.0
+Environment=SERVER_PORT=8080
+# 已完成安装后不要开 AUTO_SETUP；首次可用手动环境变量安装
+
+ExecStart=/opt/sub2api/sub2api
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sub2api
+
+# 安全加固
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/sub2api/data
+
+# 1C1G 可按需打开内存上限（单位字节，约 768MB）
+# MemoryMax=768M
+
+[Install]
+WantedBy=multi-user.target
