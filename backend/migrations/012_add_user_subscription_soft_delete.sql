@@ -4,7 +4,7 @@
 -- 任务：fix-medium-data-hygiene 1.1
 
 -- 添加 deleted_at 字段
-ALTER TABLE user_subscriptions ADD COLUMN deleted_at TEXT DEFAULT NULL;
+ALTER TABLE user_subscriptions ADD COLUMN deleted_at DATETIME DEFAULT NULL;
 
 -- 添加 deleted_at 索引以优化软删除查询
 CREATE INDEX IF NOT EXISTS usersubscription_deleted_at

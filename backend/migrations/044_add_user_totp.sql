@@ -3,7 +3,7 @@
 -- 为 users 表添加 TOTP 双因素认证字段
 ALTER TABLE users ADD COLUMN totp_secret_encrypted TEXT DEFAULT NULL;
 ALTER TABLE users ADD COLUMN totp_enabled BOOLEAN NOT NULL DEFAULT FALSE;
-ALTER TABLE users ADD COLUMN totp_enabled_at TEXT DEFAULT NULL;
+ALTER TABLE users ADD COLUMN totp_enabled_at DATETIME DEFAULT NULL;
 
 -- [sqlite] skipped COMMENT ON column
 

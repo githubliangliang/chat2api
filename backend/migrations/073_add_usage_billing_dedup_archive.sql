@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS usage_billing_dedup_archive (
     request_id VARCHAR(255) NOT NULL,
     api_key_id BIGINT NOT NULL,
     request_fingerprint VARCHAR(64) NOT NULL,
-    created_at TEXT NOT NULL,
-    archived_at TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at DATETIME NOT NULL,
+    archived_at DATETIME NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (request_id, api_key_id)
 );

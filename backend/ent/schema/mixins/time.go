@@ -21,12 +21,15 @@ func (TimeMixin) Fields() []ent.Field {
 			Default(time.Now).
 			SchemaType(map[string]string{
 				dialect.Postgres: "timestamptz",
+				// DATETIME (not TEXT) so modernc.org/sqlite scans into time.Time
+				dialect.SQLite: "datetime",
 			}),
 		field.Time("updated_at").
 			Default(time.Now).
 			UpdateDefault(time.Now).
 			SchemaType(map[string]string{
 				dialect.Postgres: "timestamptz",
+				dialect.SQLite:   "datetime",
 			}),
 	}
 }

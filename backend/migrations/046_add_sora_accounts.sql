@@ -16,8 +16,8 @@ CREATE TABLE IF NOT EXISTS sora_accounts (
     access_token TEXT NOT NULL,
     refresh_token TEXT NOT NULL,
     session_token TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
     CONSTRAINT fk_sora_accounts_account_id
         FOREIGN KEY (account_id) REFERENCES accounts(id)
         ON DELETE CASCADE

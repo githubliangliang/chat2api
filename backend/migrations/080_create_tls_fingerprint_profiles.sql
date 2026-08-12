@@ -22,8 +22,8 @@ CREATE TABLE IF NOT EXISTS tls_fingerprint_profiles (
     key_share_groups     TEXT,
     psk_modes            TEXT,
     extensions           TEXT,
-    created_at   TEXT  NOT NULL DEFAULT (datetime('now')),
-    updated_at   TEXT  NOT NULL DEFAULT (datetime('now'))
+    created_at DATETIME  NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME  NOT NULL DEFAULT (datetime('now'))
 );
 
 -- [sqlite] skipped COMMENT ON table

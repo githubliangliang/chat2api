@@ -3,7 +3,7 @@
 CREATE TABLE IF NOT EXISTS passkey_user_handles (
     user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     user_handle BLOB NOT NULL UNIQUE,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS passkey_credentials (
@@ -12,9 +12,9 @@ CREATE TABLE IF NOT EXISTS passkey_credentials (
     credential_id BLOB NOT NULL UNIQUE,
     name VARCHAR(100) NOT NULL DEFAULT 'Passkey',
     credential_data TEXT NOT NULL,
-    last_used_at TEXT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    last_used_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS passkey_credentials_user_id_idx

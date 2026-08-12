@@ -626,15 +626,113 @@ func validateMigrationExecutionMode(name, content string) (bool, error) {
 	return true, nil
 }
 
+// splitSQLStatements splits SQL on ';' while ignoring semicolons inside:
+// - line comments (-- ...)
+// - block comments (/* ... */)
+// - single-quoted string literals
+// - double-quoted identifiers
+// Naive strings.Split on ';' breaks CREATE TABLE statements when comments
+// contain "optional; ..." (see 033_ops_monitoring_vnext.sql).
 func splitSQLStatements(content string) []string {
-	parts := strings.Split(content, ";")
-	out := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if strings.TrimSpace(part) == "" {
+	var out []string
+	var b strings.Builder
+	b.Grow(len(content) / 4)
+
+	inLineComment := false
+	inBlockComment := false
+	inSingleQuote := false
+	inDoubleQuote := false
+
+	flush := func() {
+		part := strings.TrimSpace(b.String())
+		b.Reset()
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+
+	for i := 0; i < len(content); i++ {
+		ch := content[i]
+		next := byte(0)
+		if i+1 < len(content) {
+			next = content[i+1]
+		}
+
+		if inLineComment {
+			b.WriteByte(ch)
+			if ch == '\n' {
+				inLineComment = false
+			}
 			continue
 		}
-		out = append(out, part)
+		if inBlockComment {
+			b.WriteByte(ch)
+			if ch == '*' && next == '/' {
+				b.WriteByte(next)
+				i++
+				inBlockComment = false
+			}
+			continue
+		}
+		if inSingleQuote {
+			b.WriteByte(ch)
+			// SQL escapes single quotes by doubling them
+			if ch == '\'' {
+				if next == '\'' {
+					b.WriteByte(next)
+					i++
+					continue
+				}
+				inSingleQuote = false
+			}
+			continue
+		}
+		if inDoubleQuote {
+			b.WriteByte(ch)
+			if ch == '"' {
+				if next == '"' {
+					b.WriteByte(next)
+					i++
+					continue
+				}
+				inDoubleQuote = false
+			}
+			continue
+		}
+
+		// entering comment / string / identifier
+		if ch == '-' && next == '-' {
+			b.WriteByte(ch)
+			b.WriteByte(next)
+			i++
+			inLineComment = true
+			continue
+		}
+		if ch == '/' && next == '*' {
+			b.WriteByte(ch)
+			b.WriteByte(next)
+			i++
+			inBlockComment = true
+			continue
+		}
+		if ch == '\'' {
+			b.WriteByte(ch)
+			inSingleQuote = true
+			continue
+		}
+		if ch == '"' {
+			b.WriteByte(ch)
+			inDoubleQuote = true
+			continue
+		}
+
+		if ch == ';' {
+			flush()
+			continue
+		}
+		b.WriteByte(ch)
 	}
+	flush()
 	return out
 }
 

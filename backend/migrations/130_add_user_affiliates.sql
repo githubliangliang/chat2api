@@ -7,8 +7,8 @@ CREATE TABLE IF NOT EXISTS user_affiliates (
     aff_count INTEGER NOT NULL DEFAULT 0,
     aff_quota DECIMAL(20,8) NOT NULL DEFAULT 0,
     aff_history_quota DECIMAL(20,8) NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_user_affiliates_inviter_id ON user_affiliates(inviter_id);

@@ -16,8 +16,8 @@ CREATE TABLE IF NOT EXISTS user_affiliate_ledger (
     action VARCHAR(32) NOT NULL,
     amount DECIMAL(20,8) NOT NULL,
     source_user_id BIGINT NULL REFERENCES users(id) ON DELETE SET NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_user_affiliate_ledger_user_id ON user_affiliate_ledger(user_id);

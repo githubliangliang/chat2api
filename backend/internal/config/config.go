@@ -1524,7 +1524,8 @@ func (d *DatabaseConfig) DSNWithTimezone(tz string) string {
 func (d *DatabaseConfig) sqliteDSN(tz string) string {
 	path := d.SQLitePath()
 	// file: DSN keeps path portable; enable foreign keys and a busy timeout for multi-connection safety.
-	dsn := fmt.Sprintf("file:%s?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)", path)
+	// _time_format=sqlite: write time.Time in SQLite-friendly form so DATETIME columns scan back.
+	dsn := fmt.Sprintf("file:%s?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_time_format=sqlite", path)
 	if tz != "" {
 		// SQLite does not apply session TimeZone like Postgres; keep for documentation/consistency.
 		_ = tz

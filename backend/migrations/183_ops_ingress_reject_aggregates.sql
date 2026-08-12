@@ -7,7 +7,7 @@
 
 CREATE TABLE IF NOT EXISTS ops_ingress_reject_aggregates (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    bucket_start TEXT NOT NULL,
+    bucket_start DATETIME NOT NULL,
     reject_reason VARCHAR(64) NOT NULL,
     route_family VARCHAR(64) NOT NULL,
     protocol VARCHAR(32) NOT NULL,
@@ -17,8 +17,8 @@ CREATE TABLE IF NOT EXISTS ops_ingress_reject_aggregates (
     request_count BIGINT NOT NULL DEFAULT 0,
     first_seen TEXT NOT NULL,
     last_seen TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
     CONSTRAINT ops_ingress_reject_aggregates_dimensions_unique UNIQUE
         (bucket_start, reject_reason, route_family, protocol, client_ip, user_id, api_key_id)
 );

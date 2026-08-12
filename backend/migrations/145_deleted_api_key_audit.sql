@@ -14,8 +14,8 @@ CREATE TABLE IF NOT EXISTS deleted_api_key_audits (
     api_key_id   BIGINT NOT NULL,                  -- 原 api_keys.id
     user_id      BIGINT NOT NULL,                  -- 原所有者(不加外键,与 ops 表设计哲学一致)
     key_name     VARCHAR(100) NOT NULL DEFAULT '', -- 原 key 名称,便于展示
-    deleted_at   TEXT  NOT NULL DEFAULT (datetime('now')),
-    created_at   TEXT  NOT NULL DEFAULT (datetime('now'))
+    deleted_at DATETIME  NOT NULL DEFAULT (datetime('now')),
+    created_at DATETIME  NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS deletedapikeyaudit_key     ON deleted_api_key_audits (key);
 CREATE INDEX IF NOT EXISTS deletedapikeyaudit_user_id ON deleted_api_key_audits (user_id);

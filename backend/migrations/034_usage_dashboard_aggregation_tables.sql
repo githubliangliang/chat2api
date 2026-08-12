@@ -5,7 +5,7 @@
 
 -- Hourly aggregates (UTC buckets).
 CREATE TABLE IF NOT EXISTS usage_dashboard_hourly (
-    bucket_start TEXT PRIMARY KEY,
+    bucket_start DATETIME PRIMARY KEY,
     total_requests BIGINT NOT NULL DEFAULT 0,
     input_tokens BIGINT NOT NULL DEFAULT 0,
     output_tokens BIGINT NOT NULL DEFAULT 0,
@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS usage_dashboard_hourly (
     actual_cost DECIMAL(20, 10) NOT NULL DEFAULT 0,
     total_duration_ms BIGINT NOT NULL DEFAULT 0,
     active_users BIGINT NOT NULL DEFAULT 0,
-    computed_at TEXT NOT NULL DEFAULT (datetime('now'))
+    computed_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_usage_dashboard_hourly_bucket_start
@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS usage_dashboard_daily (
     actual_cost DECIMAL(20, 10) NOT NULL DEFAULT 0,
     total_duration_ms BIGINT NOT NULL DEFAULT 0,
     active_users BIGINT NOT NULL DEFAULT 0,
-    computed_at TEXT NOT NULL DEFAULT (datetime('now'))
+    computed_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_usage_dashboard_daily_bucket_date
@@ -55,7 +55,7 @@ CREATE INDEX IF NOT EXISTS idx_usage_dashboard_daily_bucket_date
 
 -- Hourly active user dedup table.
 CREATE TABLE IF NOT EXISTS usage_dashboard_hourly_users (
-    bucket_start TEXT NOT NULL,
+    bucket_start DATETIME NOT NULL,
     user_id BIGINT NOT NULL,
     PRIMARY KEY (bucket_start, user_id)
 );
@@ -76,8 +76,8 @@ CREATE INDEX IF NOT EXISTS idx_usage_dashboard_daily_users_bucket_date
 -- Aggregation watermark table (single row).
 CREATE TABLE IF NOT EXISTS usage_dashboard_aggregation_watermark (
     id INT PRIMARY KEY,
-    last_aggregated_at TEXT NOT NULL DEFAULT '1970-01-01 00:00:00+00',
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    last_aggregated_at DATETIME NOT NULL DEFAULT '1970-01-01 00:00:00+00',
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
 INSERT INTO usage_dashboard_aggregation_watermark (id)

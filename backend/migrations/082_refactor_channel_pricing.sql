@@ -28,8 +28,8 @@ CREATE TABLE IF NOT EXISTS channel_pricing_intervals (
     cache_read_price  NUMERIC(20,12),
     per_request_price NUMERIC(20,12),
     sort_order        INT            NOT NULL DEFAULT 0,
-    created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
-    updated_at        TEXT    NOT NULL DEFAULT (datetime('now'))
+    created_at DATETIME    NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME    NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_channel_pricing_intervals_pricing_id

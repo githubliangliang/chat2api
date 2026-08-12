@@ -15,6 +15,16 @@ func EnsureSQLiteAuxTables(ctx context.Context, db *sql.DB) error {
 		return fmt.Errorf("nil sql db")
 	}
 	stmts := []string{
+		// Required by login/user lookup (loadAllowedGroups). Migration 007 was
+		// historically converted to a SQLite no-op; keep a safety net here.
+		`CREATE TABLE IF NOT EXISTS user_allowed_groups (
+			user_id INTEGER NOT NULL,
+			group_id INTEGER NOT NULL,
+			created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+			PRIMARY KEY (user_id, group_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_user_allowed_groups_group_id
+			ON user_allowed_groups (group_id)`,
 		// Required by userRepository.GetUserAvatar on every authenticated request.
 		`CREATE TABLE IF NOT EXISTS user_avatars (
 			user_id INTEGER NOT NULL PRIMARY KEY,

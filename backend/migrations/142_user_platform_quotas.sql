@@ -22,11 +22,11 @@ CREATE TABLE IF NOT EXISTS user_platform_quotas (
     -- 窗口起点（NULL = 首次尚未初始化）
     daily_window_start   TEXT,
     weekly_window_start  TEXT,
-    monthly_window_start TEXT,
+    monthly_window_start DATETIME,
 
-    created_at           TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at           TEXT NOT NULL DEFAULT (datetime('now')),
-    deleted_at           TEXT
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    deleted_at DATETIME
 );
 
 -- 软删除友好唯一索引：同用户同平台只允许一条未删除记录

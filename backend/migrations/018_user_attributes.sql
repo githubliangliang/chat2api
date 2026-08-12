@@ -15,9 +15,9 @@ CREATE TABLE IF NOT EXISTS user_attribute_definitions (
     placeholder     VARCHAR(255) DEFAULT '',
     display_order   INT NOT NULL DEFAULT 0,
     enabled         BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    deleted_at      TEXT
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    deleted_at DATETIME
 );
 
 -- Partial unique index for key (only for non-deleted records)
@@ -38,8 +38,8 @@ CREATE TABLE IF NOT EXISTS user_attribute_values (
     user_id         BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     attribute_id    BIGINT NOT NULL REFERENCES user_attribute_definitions(id) ON DELETE CASCADE,
     value           TEXT DEFAULT '',
-    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
 
     UNIQUE(user_id, attribute_id)
 );

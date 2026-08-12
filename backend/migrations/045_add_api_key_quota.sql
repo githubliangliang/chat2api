@@ -10,7 +10,7 @@ ALTER TABLE api_keys ADD COLUMN quota DECIMAL(20, 8) NOT NULL DEFAULT 0;
 ALTER TABLE api_keys ADD COLUMN quota_used DECIMAL(20, 8) NOT NULL DEFAULT 0;
 
 -- Add expiration time field (NULL = never expires)
-ALTER TABLE api_keys ADD COLUMN expires_at TEXT;
+ALTER TABLE api_keys ADD COLUMN expires_at DATETIME;
 
 -- Add indexes for efficient quota queries
 CREATE INDEX IF NOT EXISTS idx_api_keys_quota_quota_used ON api_keys(quota, quota_used) WHERE deleted_at IS NULL;

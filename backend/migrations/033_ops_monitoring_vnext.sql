@@ -136,7 +136,7 @@ CREATE TABLE IF NOT EXISTS ops_error_logs (
     is_retryable BOOLEAN NOT NULL DEFAULT false,
     retry_count INT NOT NULL DEFAULT 0,
 
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
 -- [sqlite] skipped COMMENT ON table
@@ -149,7 +149,7 @@ CREATE TABLE IF NOT EXISTS ops_error_logs (
 CREATE TABLE IF NOT EXISTS ops_retry_attempts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
 
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
 
     requested_by_user_id BIGINT,
     source_error_id BIGINT,
@@ -160,8 +160,8 @@ CREATE TABLE IF NOT EXISTS ops_retry_attempts (
 
     -- queued|running|succeeded|failed
     status VARCHAR(16) NOT NULL DEFAULT 'queued',
-    started_at TEXT,
-    finished_at TEXT,
+    started_at DATETIME,
+    finished_at DATETIME,
     duration_ms BIGINT,
 
     -- Optional result correlation
@@ -182,7 +182,7 @@ CREATE TABLE IF NOT EXISTS ops_retry_attempts (
 CREATE TABLE IF NOT EXISTS ops_system_metrics (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
 
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
     window_minutes INT NOT NULL DEFAULT 1,
 
     -- Optional dimensions (only if collector chooses to write per-dimension snapshots)
@@ -251,13 +251,13 @@ CREATE TABLE IF NOT EXISTS ops_system_metrics (
 CREATE TABLE IF NOT EXISTS ops_job_heartbeats (
     job_name VARCHAR(64) PRIMARY KEY,
 
-    last_run_at TEXT,
-    last_success_at TEXT,
-    last_error_at TEXT,
+    last_run_at DATETIME,
+    last_success_at DATETIME,
+    last_error_at DATETIME,
     last_error TEXT,
     last_duration_ms BIGINT,
 
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
 -- [sqlite] skipped COMMENT ON table
@@ -289,9 +289,9 @@ CREATE TABLE IF NOT EXISTS ops_alert_rules (
     -- Optional scoping: platform/group filters etc.
     filters TEXT,
 
-    last_triggered_at TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    last_triggered_at DATETIME,
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ops_alert_rules_name_unique
@@ -314,11 +314,11 @@ CREATE TABLE IF NOT EXISTS ops_alert_events (
     threshold_value REAL,
     dimensions TEXT,
 
-    fired_at TEXT NOT NULL DEFAULT (datetime('now')),
-    resolved_at TEXT,
+    fired_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    resolved_at DATETIME,
 
     email_sent BOOLEAN NOT NULL DEFAULT false,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_ops_alert_events_rule_status
@@ -354,7 +354,7 @@ CREATE INDEX IF NOT EXISTS idx_ops_alert_events_fired_at
 CREATE TABLE IF NOT EXISTS ops_metrics_hourly (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
 
-    bucket_start TEXT NOT NULL,
+    bucket_start DATETIME NOT NULL,
     platform VARCHAR(32),
     group_id BIGINT,
 
@@ -381,8 +381,8 @@ CREATE TABLE IF NOT EXISTS ops_metrics_hourly (
     ttft_p95_ms INT,
     ttft_p99_ms INT,
 
-    computed_at TEXT NOT NULL DEFAULT (datetime('now')),
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    computed_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    created_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
 -- Uniqueness across three “dimension modes” (overall / platform / group).
@@ -440,8 +440,8 @@ CREATE TABLE IF NOT EXISTS ops_metrics_daily (
     ttft_p95_ms INT,
     ttft_p99_ms INT,
 
-    computed_at TEXT NOT NULL DEFAULT (datetime('now')),
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    computed_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    created_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ops_metrics_daily_unique_dim

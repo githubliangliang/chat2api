@@ -14,8 +14,8 @@ CREATE TABLE IF NOT EXISTS channels (
     name        VARCHAR(100) NOT NULL,
     description TEXT         DEFAULT '',
     status      VARCHAR(20)  NOT NULL DEFAULT 'active',
-    created_at  TEXT  NOT NULL DEFAULT (datetime('now')),
-    updated_at  TEXT  NOT NULL DEFAULT (datetime('now'))
+    created_at DATETIME  NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME  NOT NULL DEFAULT (datetime('now'))
 );
 
 -- 渠道名称唯一索引
@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS channel_groups (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     channel_id  BIGINT       NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
     group_id    BIGINT       NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
-    created_at  TEXT  NOT NULL DEFAULT (datetime('now'))
+    created_at DATETIME  NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_groups_group_id ON channel_groups (group_id);
@@ -43,8 +43,8 @@ CREATE TABLE IF NOT EXISTS channel_model_pricing (
     cache_write_price  NUMERIC(20,12),
     cache_read_price   NUMERIC(20,12),
     image_output_price NUMERIC(20,8),
-    created_at         TEXT    NOT NULL DEFAULT (datetime('now')),
-    updated_at         TEXT    NOT NULL DEFAULT (datetime('now'))
+    created_at DATETIME    NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME    NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_channel_model_pricing_channel_id ON channel_model_pricing (channel_id);

@@ -6,8 +6,8 @@ CREATE TABLE IF NOT EXISTS user_group_rate_multipliers (
     user_id         BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     group_id        BIGINT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
     rate_multiplier DECIMAL(10,4) NOT NULL,
-    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (user_id, group_id)
 );
 

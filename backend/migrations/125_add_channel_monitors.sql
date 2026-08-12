@@ -26,10 +26,10 @@ CREATE TABLE IF NOT EXISTS channel_monitors (
     group_name        VARCHAR(100) NOT NULL DEFAULT '',
     enabled           BOOLEAN      NOT NULL DEFAULT TRUE,
     interval_seconds  INT          NOT NULL,
-    last_checked_at   TEXT,
+    last_checked_at DATETIME,
     created_by        BIGINT       NOT NULL,
-    created_at        TEXT  NOT NULL DEFAULT (datetime('now')),
-    updated_at        TEXT  NOT NULL DEFAULT (datetime('now')),
+    created_at DATETIME  NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME  NOT NULL DEFAULT (datetime('now')),
     CONSTRAINT channel_monitors_provider_check CHECK (provider IN ('openai', 'anthropic', 'gemini')),
     CONSTRAINT channel_monitors_interval_check CHECK (interval_seconds BETWEEN 15 AND 3600)
 );
@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS channel_monitor_histories (
     latency_ms      INT,
     ping_latency_ms INT,
     message         VARCHAR(500) NOT NULL DEFAULT '',
-    checked_at      TEXT  NOT NULL DEFAULT (datetime('now')),
+    checked_at DATETIME  NOT NULL DEFAULT (datetime('now')),
     CONSTRAINT channel_monitor_histories_status_check
         CHECK (status IN ('operational', 'degraded', 'failed', 'error'))
 );

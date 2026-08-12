@@ -9,7 +9,7 @@
 --   3. request_body 为脱敏后的请求体（敏感键值已擦除、超长截断）
 CREATE TABLE IF NOT EXISTS audit_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
     actor_user_id BIGINT,
     actor_email VARCHAR(255) NOT NULL DEFAULT '',
     actor_role VARCHAR(32) NOT NULL DEFAULT '',

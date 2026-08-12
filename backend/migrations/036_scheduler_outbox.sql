@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS scheduler_outbox (
     account_id BIGINT NULL,
     group_id BIGINT NULL,
     payload TEXT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_scheduler_outbox_created_at ON scheduler_outbox (created_at);

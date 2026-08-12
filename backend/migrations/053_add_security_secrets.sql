@@ -5,8 +5,8 @@ CREATE TABLE IF NOT EXISTS security_secrets (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   key VARCHAR(100) NOT NULL UNIQUE,
   value TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+  updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_security_secrets_key ON security_secrets (key);

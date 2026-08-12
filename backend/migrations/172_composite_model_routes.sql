@@ -11,9 +11,9 @@ CREATE TABLE IF NOT EXISTS composite_model_routes (
     priority INTEGER NOT NULL DEFAULT 100,
     enabled BOOLEAN NOT NULL DEFAULT TRUE,
     notes TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    deleted_at TEXT NULL,
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    deleted_at DATETIME NULL,
     CONSTRAINT composite_model_routes_match_type_check CHECK (match_type IN ('exact', 'prefix')),
     CONSTRAINT composite_model_routes_endpoint_check CHECK (endpoint IN ('any', 'messages', 'count_tokens', 'responses', 'chat_completions', 'embeddings', 'images', 'gemini')),
     CONSTRAINT composite_model_routes_target_platform_check CHECK (target_platform IN ('anthropic', 'openai', 'gemini', 'antigravity', 'grok'))

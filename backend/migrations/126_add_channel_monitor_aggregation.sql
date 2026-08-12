@@ -16,7 +16,7 @@
 --   - rollup 上 (bucket_date) 索引服务清理任务的 DELETE WHERE bucket_date < cutoff。
 
 -- 1) 给历史明细表加软删除字段
-ALTER TABLE channel_monitor_histories ADD COLUMN deleted_at TEXT;
+ALTER TABLE channel_monitor_histories ADD COLUMN deleted_at DATETIME;
 
 CREATE INDEX IF NOT EXISTS idx_channel_monitor_histories_deleted_at
     ON channel_monitor_histories (deleted_at);
@@ -37,8 +37,8 @@ CREATE TABLE IF NOT EXISTS channel_monitor_daily_rollups (
     count_latency         INT          NOT NULL DEFAULT 0,
     sum_ping_latency_ms   BIGINT       NOT NULL DEFAULT 0,
     count_ping_latency    INT          NOT NULL DEFAULT 0,
-    computed_at           TEXT  NOT NULL DEFAULT (datetime('now')),
-    deleted_at            TEXT
+    computed_at DATETIME  NOT NULL DEFAULT (datetime('now')),
+    deleted_at DATETIME
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_monitor_daily_rollups_unique
@@ -52,7 +52,7 @@ CREATE INDEX IF NOT EXISTS idx_channel_monitor_daily_rollups_deleted_at
 CREATE TABLE IF NOT EXISTS channel_monitor_aggregation_watermark (
     id                   INT          PRIMARY KEY DEFAULT 1,
     last_aggregated_date DATE,
-    updated_at           TEXT  NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME  NOT NULL DEFAULT (datetime('now')),
     CONSTRAINT channel_monitor_aggregation_watermark_singleton CHECK (id = 1)
 );
 

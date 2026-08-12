@@ -15,7 +15,7 @@
 
 ALTER TABLE ops_error_logs ADD COLUMN resolved BOOLEAN NOT NULL DEFAULT false;
 
-ALTER TABLE ops_error_logs ADD COLUMN resolved_at TEXT;
+ALTER TABLE ops_error_logs ADD COLUMN resolved_at DATETIME;
 
 ALTER TABLE ops_error_logs ADD COLUMN resolved_by_user_id BIGINT;
 

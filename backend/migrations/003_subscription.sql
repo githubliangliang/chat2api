@@ -22,14 +22,14 @@ CREATE TABLE IF NOT EXISTS user_subscriptions (
     group_id                BIGINT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
 
     -- 订阅有效期
-    starts_at               TEXT NOT NULL,
-    expires_at              TEXT NOT NULL,
+    starts_at DATETIME NOT NULL,
+    expires_at DATETIME NOT NULL,
     status                  VARCHAR(20) NOT NULL DEFAULT 'active',  -- active/expired/suspended
 
     -- 滑动窗口起始时间（NULL=未激活）
     daily_window_start      TEXT,
     weekly_window_start     TEXT,
-    monthly_window_start    TEXT,
+    monthly_window_start DATETIME,
 
     -- 当前窗口已用额度（USD，基于 total_cost 计算）
     daily_usage_usd         DECIMAL(20, 10) NOT NULL DEFAULT 0,
@@ -38,11 +38,11 @@ CREATE TABLE IF NOT EXISTS user_subscriptions (
 
     -- 管理员分配信息
     assigned_by             BIGINT REFERENCES users(id) ON DELETE SET NULL,
-    assigned_at             TEXT NOT NULL DEFAULT (datetime('now')),
+    assigned_at DATETIME NOT NULL DEFAULT (datetime('now')),
     notes                   TEXT,
 
-    created_at              TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at              TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
 
     -- 唯一约束：每个用户对每个分组只能有一个订阅
     UNIQUE(user_id, group_id)

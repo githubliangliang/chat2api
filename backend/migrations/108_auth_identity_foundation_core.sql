@@ -1,8 +1,8 @@
 -- [sqlite-converted] from PostgreSQL migration: 108_auth_identity_foundation_core.sql
 -- Auto-converted for SQLite dialect. Review complex logic if needed.
 ALTER TABLE users ADD COLUMN signup_source VARCHAR(20) NOT NULL DEFAULT 'email';
-ALTER TABLE users ADD COLUMN last_login_at TEXT NULL;
-ALTER TABLE users ADD COLUMN last_active_at TEXT NULL;
+ALTER TABLE users ADD COLUMN last_login_at DATETIME NULL;
+ALTER TABLE users ADD COLUMN last_active_at DATETIME NULL;
 
 UPDATE users
 SET signup_source = 'email'
@@ -17,11 +17,11 @@ CREATE TABLE IF NOT EXISTS auth_identities (
     provider_type VARCHAR(20) NOT NULL,
     provider_key TEXT NOT NULL,
     provider_subject TEXT NOT NULL,
-    verified_at TEXT NULL,
+    verified_at DATETIME NULL,
     issuer TEXT NULL,
     metadata TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
     CONSTRAINT auth_identities_provider_type_check
         CHECK (provider_type IN ('email', 'linuxdo', 'wechat', 'oidc'))
 );
@@ -44,8 +44,8 @@ CREATE TABLE IF NOT EXISTS auth_identity_channels (
     channel_app_id TEXT NOT NULL,
     channel_subject TEXT NOT NULL,
     metadata TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
     CONSTRAINT auth_identity_channels_provider_type_check
         CHECK (provider_type IN ('email', 'linuxdo', 'wechat', 'oidc'))
 );
@@ -71,14 +71,14 @@ CREATE TABLE IF NOT EXISTS pending_auth_sessions (
     local_flow_state TEXT NOT NULL DEFAULT '{}',
     browser_session_key TEXT NOT NULL DEFAULT '',
     completion_code_hash TEXT NOT NULL DEFAULT '',
-    completion_code_expires_at TEXT NULL,
-    email_verified_at TEXT NULL,
-    password_verified_at TEXT NULL,
-    totp_verified_at TEXT NULL,
-    expires_at TEXT NOT NULL,
-    consumed_at TEXT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    completion_code_expires_at DATETIME NULL,
+    email_verified_at DATETIME NULL,
+    password_verified_at DATETIME NULL,
+    totp_verified_at DATETIME NULL,
+    expires_at DATETIME NOT NULL,
+    consumed_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
     CONSTRAINT pending_auth_sessions_intent_check
         CHECK (intent IN ('login', 'bind_current_user', 'adopt_existing_user_by_email')),
     CONSTRAINT pending_auth_sessions_provider_type_check
@@ -106,9 +106,9 @@ CREATE TABLE IF NOT EXISTS identity_adoption_decisions (
     identity_id BIGINT NULL REFERENCES auth_identities(id) ON DELETE SET NULL,
     adopt_display_name BOOLEAN NOT NULL DEFAULT FALSE,
     adopt_avatar BOOLEAN NOT NULL DEFAULT FALSE,
-    decided_at TEXT NOT NULL DEFAULT (datetime('now')),
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    decided_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS identity_adoption_decisions_pending_auth_session_id_key
@@ -122,7 +122,7 @@ CREATE TABLE IF NOT EXISTS auth_identity_migration_reports (
     report_type VARCHAR(40) NOT NULL,
     report_key TEXT NOT NULL,
     details TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS auth_identity_migration_reports_type_idx

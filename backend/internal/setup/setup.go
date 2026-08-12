@@ -230,7 +230,7 @@ func buildDatabaseConnectionDSNs(cfg *DatabaseConfig) (bootstrapDSN, targetDSN s
 
 func buildSQLiteDSN(cfg *DatabaseConfig) string {
 	path := cfg.SQLitePath()
-	return fmt.Sprintf("file:%s?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)", path)
+	return fmt.Sprintf("file:%s?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_time_format=sqlite", path)
 }
 
 // TestDatabaseConnection tests the database connection and creates database if not exists

@@ -1,7 +1,7 @@
 -- [sqlite-converted] from PostgreSQL migration: 030_add_account_expires_at.sql
 -- Auto-converted for SQLite dialect. Review complex logic if needed.
 -- Add expires_at for account expiration configuration
-ALTER TABLE accounts ADD COLUMN expires_at TEXT;
+ALTER TABLE accounts ADD COLUMN expires_at DATETIME;
 -- Document expires_at meaning
 -- [sqlite] skipped COMMENT ON column
 

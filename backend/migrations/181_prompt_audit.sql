@@ -28,13 +28,13 @@ CREATE TABLE IF NOT EXISTS prompt_audit_jobs (
     attempts              INT NOT NULL DEFAULT 0,
     max_attempts          INT NOT NULL DEFAULT 3,
     claim_version         BIGINT NOT NULL DEFAULT 0,
-    next_attempt_at       TEXT NOT NULL DEFAULT (datetime('now')),
-    processing_started_at TEXT,
-    processed_at          TEXT,
+    next_attempt_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    processing_started_at DATETIME,
+    processed_at DATETIME,
     last_error_code       VARCHAR(64) NOT NULL DEFAULT '',
     last_error_message    VARCHAR(512) NOT NULL DEFAULT '',
-    created_at            TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at            TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
     CONSTRAINT chk_prompt_audit_jobs_status
         CHECK (status IN ('staging', 'queued', 'processing', 'retry', 'done', 'failed')),
     CONSTRAINT chk_prompt_audit_jobs_execution_mode
@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS prompt_audit_events (
     config_version           BIGINT NOT NULL DEFAULT 1,
     chunk_total              INT NOT NULL DEFAULT 0,
     latency_ms               INT NOT NULL DEFAULT 0,
-    created_at               TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
     CONSTRAINT chk_prompt_audit_events_decision
         CHECK (decision IN ('pass', 'flag', 'critical')),
     CONSTRAINT chk_prompt_audit_events_risk_level

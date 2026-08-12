@@ -2,7 +2,7 @@
 -- Ops monitoring: pre-aggregation tables for dashboard queries (schema only).
 
 CREATE TABLE IF NOT EXISTS ops_metrics_hourly (
-    bucket_start TEXT NOT NULL,
+    bucket_start DATETIME NOT NULL,
     platform VARCHAR(50) NOT NULL,
     request_count BIGINT NOT NULL DEFAULT 0,
     success_count BIGINT NOT NULL DEFAULT 0,
@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS ops_metrics_hourly (
     avg_latency_ms REAL,
     p99_latency_ms REAL,
     error_rate REAL NOT NULL DEFAULT 0,
-    computed_at TEXT NOT NULL DEFAULT (datetime('now')),
+    computed_at DATETIME NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (bucket_start, platform)
 );
 
@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS ops_metrics_daily (
     avg_latency_ms REAL,
     p99_latency_ms REAL,
     error_rate REAL NOT NULL DEFAULT 0,
-    computed_at TEXT NOT NULL DEFAULT (datetime('now')),
+    computed_at DATETIME NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (bucket_date, platform)
 );
 

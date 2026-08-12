@@ -12,14 +12,14 @@ CREATE TABLE IF NOT EXISTS channel_monitor_v2_config (
     platforms TEXT NOT NULL DEFAULT '[{"platform":"anthropic","enabled":true,"models":[]},{"platform":"openai","enabled":true,"models":[]},{"platform":"grok","enabled":true,"models":[]},{"platform":"kiro","enabled":true,"models":[]},{"platform":"gemini","enabled":true,"models":[]},{"platform":"antigravity","enabled":true,"models":[]}]',
     group_ids TEXT NOT NULL DEFAULT '{}',
     updated_by BIGINT,
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
 INSERT INTO channel_monitor_v2_config (id) VALUES (1)
 ON CONFLICT (id) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS channel_monitor_v2_metrics_1m (
-    bucket_start TEXT NOT NULL,
+    bucket_start DATETIME NOT NULL,
     platform TEXT NOT NULL,
     group_id BIGINT NOT NULL DEFAULT 0,
     model TEXT NOT NULL,
@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS channel_monitor_v2_metrics_1m (
     ttft_count BIGINT NOT NULL DEFAULT 0,
     duration_sum_ms BIGINT NOT NULL DEFAULT 0,
     duration_count BIGINT NOT NULL DEFAULT 0,
-    computed_at TEXT NOT NULL DEFAULT (datetime('now')),
+    computed_at DATETIME NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (bucket_start, platform, group_id, model)
 );
 
@@ -47,7 +47,7 @@ CREATE INDEX IF NOT EXISTS idx_channel_monitor_v2_metrics_model_time
     ON channel_monitor_v2_metrics_1m (model, bucket_start DESC);
 
 CREATE TABLE IF NOT EXISTS channel_monitor_v2_user_metrics_1m (
-    bucket_start TEXT NOT NULL,
+    bucket_start DATETIME NOT NULL,
     platform TEXT NOT NULL,
     group_id BIGINT NOT NULL DEFAULT 0,
     model TEXT NOT NULL,
@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS channel_monitor_v2_user_metrics_1m (
     ttft_count BIGINT NOT NULL DEFAULT 0,
     duration_sum_ms BIGINT NOT NULL DEFAULT 0,
     duration_count BIGINT NOT NULL DEFAULT 0,
-    computed_at TEXT NOT NULL DEFAULT (datetime('now')),
+    computed_at DATETIME NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (bucket_start, platform, group_id, model, user_id)
 );
 
@@ -72,7 +72,7 @@ CREATE INDEX IF NOT EXISTS idx_channel_monitor_v2_user_metrics_time
     ON channel_monitor_v2_user_metrics_1m (bucket_start DESC);
 
 CREATE TABLE IF NOT EXISTS channel_monitor_v2_error_metrics_1m (
-    bucket_start TEXT NOT NULL,
+    bucket_start DATETIME NOT NULL,
     platform TEXT NOT NULL,
     group_id BIGINT NOT NULL DEFAULT 0,
     model TEXT NOT NULL,
@@ -88,7 +88,7 @@ CREATE INDEX IF NOT EXISTS idx_channel_monitor_v2_errors_category_time
     ON channel_monitor_v2_error_metrics_1m (error_category, bucket_start DESC);
 
 CREATE TABLE IF NOT EXISTS channel_monitor_v2_latency_histograms_1m (
-    bucket_start TEXT NOT NULL,
+    bucket_start DATETIME NOT NULL,
     platform TEXT NOT NULL,
     group_id BIGINT NOT NULL DEFAULT 0,
     model TEXT NOT NULL,
@@ -107,9 +107,9 @@ CREATE TABLE IF NOT EXISTS channel_monitor_v2_watermarks (
     usage_coverage_start TEXT,
     error_coverage_start TEXT,
     data_through TEXT,
-    last_successful_at TEXT,
+    last_successful_at DATETIME,
     backfill_cursor TEXT,
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
 INSERT INTO channel_monitor_v2_watermarks (id) VALUES (1)

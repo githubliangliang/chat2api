@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS billing_usage_entries (
     billing_type SMALLINT NOT NULL,
     applied BOOLEAN NOT NULL DEFAULT TRUE,
     delta_usd DECIMAL(20, 10) NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS billing_usage_entries_usage_log_id_unique

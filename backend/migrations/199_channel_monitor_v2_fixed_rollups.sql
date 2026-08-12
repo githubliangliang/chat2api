@@ -6,7 +6,7 @@
 -- filter change. The background aggregator overwrites affected buckets.
 
 CREATE TABLE IF NOT EXISTS channel_monitor_v2_metrics_rollup (
-    bucket_start TEXT NOT NULL,
+    bucket_start DATETIME NOT NULL,
     bucket_seconds INTEGER NOT NULL CHECK (bucket_seconds IN (300, 3600, 43200, 86400)),
     platform TEXT NOT NULL,
     group_id BIGINT NOT NULL DEFAULT 0,
@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS channel_monitor_v2_metrics_rollup (
     ttft_count BIGINT NOT NULL DEFAULT 0,
     duration_sum_ms BIGINT NOT NULL DEFAULT 0,
     duration_count BIGINT NOT NULL DEFAULT 0,
-    computed_at TEXT NOT NULL DEFAULT (datetime('now')),
+    computed_at DATETIME NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (bucket_seconds, bucket_start, platform, group_id, model)
 );
 
@@ -35,7 +35,7 @@ CREATE INDEX IF NOT EXISTS idx_channel_monitor_v2_metrics_rollup_model_time
     ON channel_monitor_v2_metrics_rollup (bucket_seconds, model, bucket_start DESC);
 
 CREATE TABLE IF NOT EXISTS channel_monitor_v2_user_metrics_rollup (
-    bucket_start TEXT NOT NULL,
+    bucket_start DATETIME NOT NULL,
     bucket_seconds INTEGER NOT NULL CHECK (bucket_seconds IN (300, 3600, 43200, 86400)),
     platform TEXT NOT NULL,
     group_id BIGINT NOT NULL DEFAULT 0,
@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS channel_monitor_v2_user_metrics_rollup (
     ttft_count BIGINT NOT NULL DEFAULT 0,
     duration_sum_ms BIGINT NOT NULL DEFAULT 0,
     duration_count BIGINT NOT NULL DEFAULT 0,
-    computed_at TEXT NOT NULL DEFAULT (datetime('now')),
+    computed_at DATETIME NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (bucket_seconds, bucket_start, platform, group_id, model, user_id)
 );
 
@@ -61,7 +61,7 @@ CREATE INDEX IF NOT EXISTS idx_channel_monitor_v2_user_rollup_time
     ON channel_monitor_v2_user_metrics_rollup (bucket_seconds, bucket_start DESC);
 
 CREATE TABLE IF NOT EXISTS channel_monitor_v2_error_metrics_rollup (
-    bucket_start TEXT NOT NULL,
+    bucket_start DATETIME NOT NULL,
     bucket_seconds INTEGER NOT NULL CHECK (bucket_seconds IN (300, 3600, 43200, 86400)),
     platform TEXT NOT NULL,
     group_id BIGINT NOT NULL DEFAULT 0,
@@ -78,7 +78,7 @@ CREATE INDEX IF NOT EXISTS idx_channel_monitor_v2_errors_rollup_category_time
     ON channel_monitor_v2_error_metrics_rollup (bucket_seconds, error_category, bucket_start DESC);
 
 CREATE TABLE IF NOT EXISTS channel_monitor_v2_latency_histograms_rollup (
-    bucket_start TEXT NOT NULL,
+    bucket_start DATETIME NOT NULL,
     bucket_seconds INTEGER NOT NULL CHECK (bucket_seconds IN (300, 3600, 43200, 86400)),
     platform TEXT NOT NULL,
     group_id BIGINT NOT NULL DEFAULT 0,

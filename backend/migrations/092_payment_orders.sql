@@ -23,21 +23,21 @@ CREATE TABLE IF NOT EXISTS payment_orders (
     status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
     refund_amount DECIMAL(20,2) NOT NULL DEFAULT 0,
     refund_reason TEXT,
-    refund_at TEXT,
+    refund_at DATETIME,
     force_refund BOOLEAN NOT NULL DEFAULT FALSE,
-    refund_requested_at TEXT,
+    refund_requested_at DATETIME,
     refund_request_reason TEXT,
     refund_requested_by VARCHAR(20),
-    expires_at TEXT NOT NULL,
-    paid_at TEXT,
-    completed_at TEXT,
-    failed_at TEXT,
+    expires_at DATETIME NOT NULL,
+    paid_at DATETIME,
+    completed_at DATETIME,
+    failed_at DATETIME,
     failed_reason TEXT,
     client_ip VARCHAR(50) NOT NULL DEFAULT '',
     src_host VARCHAR(255) NOT NULL DEFAULT '',
     src_url TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_payment_orders_user_id ON payment_orders(user_id);

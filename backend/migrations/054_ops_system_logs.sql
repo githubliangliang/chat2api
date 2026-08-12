@@ -5,7 +5,7 @@
 
 CREATE TABLE IF NOT EXISTS ops_system_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at DATETIME NOT NULL DEFAULT (datetime('now')),
   level VARCHAR(16) NOT NULL,
   component VARCHAR(128) NOT NULL DEFAULT '',
   message TEXT NOT NULL,
@@ -47,7 +47,7 @@ CREATE INDEX IF NOT EXISTS idx_ops_system_logs_platform_model_created_at
 
 CREATE TABLE IF NOT EXISTS ops_system_log_cleanup_audits (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at DATETIME NOT NULL DEFAULT (datetime('now')),
   operator_id BIGINT NOT NULL,
   conditions TEXT NOT NULL DEFAULT '{}',
   deleted_rows BIGINT NOT NULL DEFAULT 0

@@ -1,7 +1,7 @@
 -- [sqlite-converted] from PostgreSQL migration: 149_proxy_expiry_fallback.sql
 -- Auto-converted for SQLite dialect. Review complex logic if needed.
 -- proxies: 有效期 + 失败回退
-ALTER TABLE proxies ADD COLUMN expires_at TEXT;
+ALTER TABLE proxies ADD COLUMN expires_at DATETIME;
 ALTER TABLE proxies ADD COLUMN fallback_mode varchar(20) NOT NULL DEFAULT 'none';
 ALTER TABLE proxies ADD COLUMN backup_proxy_id BIGINT REFERENCES proxies(id) ON DELETE SET NULL;
 ALTER TABLE proxies ADD COLUMN expiry_warn_days INT NOT NULL DEFAULT 7;

@@ -5,8 +5,8 @@ CREATE TABLE IF NOT EXISTS user_provider_default_grants (
     user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     provider_type VARCHAR(20) NOT NULL,
     grant_reason VARCHAR(20) NOT NULL DEFAULT 'first_bind',
-    granted_at TEXT NOT NULL DEFAULT (datetime('now')),
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    granted_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
     CONSTRAINT user_provider_default_grants_provider_type_check
         CHECK (provider_type IN ('email', 'linuxdo', 'wechat', 'oidc')),
     CONSTRAINT user_provider_default_grants_reason_check
@@ -28,8 +28,8 @@ CREATE TABLE IF NOT EXISTS user_avatars (
     content_type VARCHAR(100) NOT NULL DEFAULT '',
     byte_size INT NOT NULL DEFAULT 0,
     sha256 VARCHAR(64) NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS user_avatars_user_id_key

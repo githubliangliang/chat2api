@@ -32,8 +32,8 @@ CREATE TABLE IF NOT EXISTS sora_generations (
     error_message    TEXT NOT NULL DEFAULT '',
 
     -- 时间
-    created_at       TEXT NOT NULL DEFAULT (datetime('now')),
-    completed_at     TEXT
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    completed_at DATETIME
 );
 
 -- 按用户+时间查询（作品库列表、历史记录）

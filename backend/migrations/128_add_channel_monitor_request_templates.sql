@@ -20,8 +20,8 @@ CREATE TABLE IF NOT EXISTS channel_monitor_request_templates (
     extra_headers TEXT        NOT NULL DEFAULT '{}',
     body_override_mode VARCHAR(10) NOT NULL DEFAULT 'off',
     body_override TEXT        NULL,
-    created_at    TEXT  NOT NULL DEFAULT (datetime('now')),
-    updated_at    TEXT  NOT NULL DEFAULT (datetime('now')),
+    created_at DATETIME  NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME  NOT NULL DEFAULT (datetime('now')),
     CONSTRAINT channel_monitor_request_templates_provider_check
         CHECK (provider IN ('openai', 'anthropic', 'gemini')),
     CONSTRAINT channel_monitor_request_templates_body_mode_check

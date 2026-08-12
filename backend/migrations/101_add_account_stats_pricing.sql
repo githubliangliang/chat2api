@@ -13,8 +13,8 @@ CREATE TABLE IF NOT EXISTS channel_account_stats_pricing_rules (
     group_ids TEXT NOT NULL DEFAULT '{}',
     account_ids TEXT NOT NULL DEFAULT '{}',
     sort_order INT NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_cas_pricing_rules_channel_id ON channel_account_stats_pricing_rules(channel_id);
 
@@ -31,8 +31,8 @@ CREATE TABLE IF NOT EXISTS channel_account_stats_model_pricing (
     cache_read_price NUMERIC(20,10),
     image_output_price NUMERIC(20,10),
     per_request_price NUMERIC(20,10),
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_cas_model_pricing_rule_id ON channel_account_stats_model_pricing(rule_id);
 

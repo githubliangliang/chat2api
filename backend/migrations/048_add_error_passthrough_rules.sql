@@ -17,8 +17,8 @@ CREATE TABLE IF NOT EXISTS error_passthrough_rules (
     passthrough_body BOOLEAN NOT NULL DEFAULT true,
     custom_message TEXT,
     description TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
 -- Indexes for efficient queries

@@ -14,8 +14,8 @@ ALTER TABLE users ADD COLUMN notes TEXT NOT NULL DEFAULT '';
 
 -- accounts: scheduling and rate-limit fields used by repository queries
 ALTER TABLE accounts ADD COLUMN schedulable BOOLEAN NOT NULL DEFAULT TRUE;
-ALTER TABLE accounts ADD COLUMN rate_limited_at TEXT;
-ALTER TABLE accounts ADD COLUMN rate_limit_reset_at TEXT;
+ALTER TABLE accounts ADD COLUMN rate_limited_at DATETIME;
+ALTER TABLE accounts ADD COLUMN rate_limit_reset_at DATETIME;
 ALTER TABLE accounts ADD COLUMN overload_until TEXT;
 ALTER TABLE accounts ADD COLUMN session_window_start TEXT;
 ALTER TABLE accounts ADD COLUMN session_window_end TEXT;
@@ -40,6 +40,6 @@ CREATE TABLE IF NOT EXISTS settings (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     key         VARCHAR(100) NOT NULL UNIQUE,
     value       TEXT NOT NULL,
-    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 

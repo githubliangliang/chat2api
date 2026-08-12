@@ -8,10 +8,10 @@ CREATE TABLE IF NOT EXISTS promo_codes (
     max_uses INT NOT NULL DEFAULT 0,
     used_count INT NOT NULL DEFAULT 0,
     status VARCHAR(20) NOT NULL DEFAULT 'active',
-    expires_at TEXT DEFAULT NULL,
+    expires_at DATETIME DEFAULT NULL,
     notes TEXT DEFAULT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
 -- 创建优惠码使用记录表
@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS promo_code_usages (
     promo_code_id BIGINT NOT NULL REFERENCES promo_codes(id) ON DELETE CASCADE,
     user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     bonus_amount DECIMAL(20,8) NOT NULL,
-    used_at TEXT NOT NULL DEFAULT (datetime('now')),
+    used_at DATETIME NOT NULL DEFAULT (datetime('now')),
     UNIQUE(promo_code_id, user_id)
 );
 

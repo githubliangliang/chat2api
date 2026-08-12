@@ -26,17 +26,17 @@ CREATE TABLE IF NOT EXISTS batch_image_jobs (
     manifest_hash VARCHAR(128),
     retry_count INTEGER NOT NULL DEFAULT 0,
     version INTEGER NOT NULL DEFAULT 0,
-    output_expires_at TEXT,
-    input_deleted_at TEXT,
-    output_deleted_at TEXT,
+    output_expires_at DATETIME,
+    input_deleted_at DATETIME,
+    output_deleted_at DATETIME,
     last_error_code VARCHAR(128),
     last_error_message TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    submitted_at TEXT,
-    started_at TEXT,
-    finished_at TEXT,
-    settled_at TEXT
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    submitted_at DATETIME,
+    started_at DATETIME,
+    finished_at DATETIME,
+    settled_at DATETIME
 );
 
 CREATE INDEX IF NOT EXISTS batch_image_jobs_user_created_at_idx ON batch_image_jobs (user_id, created_at);
@@ -65,8 +65,8 @@ CREATE TABLE IF NOT EXISTS batch_image_items (
     error_code VARCHAR(128),
     error_message TEXT,
     billed_amount DECIMAL(20,10),
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    indexed_at TEXT
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    indexed_at DATETIME
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS batch_image_items_job_custom_uq ON batch_image_items (job_id, custom_id);
@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS batch_image_events (
     event_type VARCHAR(64) NOT NULL,
     payload TEXT,
     event_hash VARCHAR(128),
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS batch_image_events_job_created_at_idx ON batch_image_events (job_id, created_at);

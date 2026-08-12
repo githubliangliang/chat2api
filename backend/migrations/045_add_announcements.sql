@@ -7,12 +7,12 @@ CREATE TABLE IF NOT EXISTS announcements (
     content TEXT NOT NULL,
     status VARCHAR(20) NOT NULL DEFAULT 'draft',
     targeting TEXT NOT NULL DEFAULT '{}',
-    starts_at TEXT DEFAULT NULL,
-    ends_at TEXT DEFAULT NULL,
+    starts_at DATETIME DEFAULT NULL,
+    ends_at DATETIME DEFAULT NULL,
     created_by BIGINT DEFAULT NULL REFERENCES users(id) ON DELETE SET NULL,
     updated_by BIGINT DEFAULT NULL REFERENCES users(id) ON DELETE SET NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
 -- 公告已读表
@@ -20,8 +20,8 @@ CREATE TABLE IF NOT EXISTS announcement_reads (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     announcement_id BIGINT NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
     user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    read_at TEXT NOT NULL DEFAULT (datetime('now')),
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    read_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
     UNIQUE(announcement_id, user_id)
 );
 

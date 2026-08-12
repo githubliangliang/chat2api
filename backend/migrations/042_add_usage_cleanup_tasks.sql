@@ -10,10 +10,10 @@ CREATE TABLE IF NOT EXISTS usage_cleanup_tasks (
     created_by BIGINT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     deleted_rows BIGINT NOT NULL DEFAULT 0,
     error_message TEXT,
-    started_at TEXT,
-    finished_at TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    started_at DATETIME,
+    finished_at DATETIME,
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_usage_cleanup_tasks_status_created_at

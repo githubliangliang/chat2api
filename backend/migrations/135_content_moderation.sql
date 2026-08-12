@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS content_moderation_logs (
     auto_banned         BOOLEAN NOT NULL DEFAULT FALSE,
     email_sent          BOOLEAN NOT NULL DEFAULT FALSE,
     queue_delay_ms      INT,
-    created_at          TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
 ALTER TABLE content_moderation_logs ADD COLUMN violation_count INT NOT NULL DEFAULT 0;

@@ -13,9 +13,9 @@ CREATE TABLE IF NOT EXISTS idempotency_records (
     response_body TEXT,
     error_reason VARCHAR(128),
     locked_until TEXT,
-    expires_at TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    expires_at DATETIME NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_idempotency_records_scope_key

@@ -13,9 +13,9 @@ CREATE TABLE IF NOT EXISTS proxies (
     username        VARCHAR(100),
     password        VARCHAR(100),
     status          VARCHAR(20) NOT NULL DEFAULT 'active', -- active/disabled
-    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    deleted_at      TEXT
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    deleted_at DATETIME
 );
 
 CREATE INDEX IF NOT EXISTS idx_proxies_status ON proxies(status);
@@ -29,9 +29,9 @@ CREATE TABLE IF NOT EXISTS groups (
     rate_multiplier DECIMAL(10, 4) NOT NULL DEFAULT 1.0,  -- 费率倍率
     is_exclusive    BOOLEAN NOT NULL DEFAULT FALSE,       -- 是否专属分组
     status          VARCHAR(20) NOT NULL DEFAULT 'active', -- active/disabled
-    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    deleted_at      TEXT
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    deleted_at DATETIME
 );
 
 CREATE INDEX IF NOT EXISTS idx_groups_name ON groups(name);
@@ -49,9 +49,9 @@ CREATE TABLE IF NOT EXISTS users (
     concurrency     INT NOT NULL DEFAULT 5,               -- 并发数限制
     status          VARCHAR(20) NOT NULL DEFAULT 'active', -- active/disabled
     allowed_groups  TEXT DEFAULT NULL,                -- 允许绑定的分组ID列表
-    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    deleted_at      TEXT
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    deleted_at DATETIME
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
@@ -71,10 +71,10 @@ CREATE TABLE IF NOT EXISTS accounts (
     priority        INT NOT NULL DEFAULT 50,              -- 调度优先级(1-100，越小越高)
     status          VARCHAR(20) NOT NULL DEFAULT 'active', -- active/disabled/error
     error_message   TEXT,
-    last_used_at    TEXT,
-    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    deleted_at      TEXT
+    last_used_at DATETIME,
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    deleted_at DATETIME
 );
 
 CREATE INDEX IF NOT EXISTS idx_accounts_platform ON accounts(platform);
@@ -93,9 +93,9 @@ CREATE TABLE IF NOT EXISTS api_keys (
     name            VARCHAR(100) NOT NULL,
     group_id        BIGINT REFERENCES groups(id) ON DELETE SET NULL,
     status          VARCHAR(20) NOT NULL DEFAULT 'active', -- active/disabled
-    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    deleted_at      TEXT
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    deleted_at DATETIME
 );
 
 CREATE INDEX IF NOT EXISTS idx_api_keys_key ON api_keys(key);
@@ -109,7 +109,7 @@ CREATE TABLE IF NOT EXISTS account_groups (
     account_id      BIGINT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     group_id        BIGINT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
     priority        INT NOT NULL DEFAULT 50,              -- 分组内优先级
-    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (account_id, group_id)
 );
 
@@ -124,8 +124,8 @@ CREATE TABLE IF NOT EXISTS redeem_codes (
     value           DECIMAL(20, 8) NOT NULL,              -- 面值（USD）
     status          VARCHAR(20) NOT NULL DEFAULT 'unused', -- unused/used
     used_by         BIGINT REFERENCES users(id) ON DELETE SET NULL,
-    used_at         TEXT,
-    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+    used_at DATETIME,
+    created_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_redeem_codes_code ON redeem_codes(code);
@@ -163,7 +163,7 @@ CREATE TABLE IF NOT EXISTS usage_logs (
     stream                      BOOLEAN NOT NULL DEFAULT FALSE,
     duration_ms                 INT,
 
-    created_at                  TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_usage_logs_user_id ON usage_logs(user_id);

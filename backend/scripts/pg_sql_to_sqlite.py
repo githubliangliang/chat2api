@@ -176,22 +176,23 @@ def convert_types_and_keywords(sql: str) -> str:
     # Avoid double-replacing SERIAL inside AUTOINCREMENT — only bare SERIAL type
     sql = re.sub(r"(?<!AUTOINCR)\bSERIAL\b", "INTEGER", sql, flags=re.IGNORECASE)
 
-    # Timestamps
-    sql = re.sub(r"\bTIMESTAMPTZ\b", "TEXT", sql, flags=re.IGNORECASE)
+    # Timestamps → DATETIME so modernc.org/sqlite can Scan into time.Time
+    # (TEXT columns stay strings and break Ent field.Time scanning).
+    sql = re.sub(r"\bTIMESTAMPTZ\b", "DATETIME", sql, flags=re.IGNORECASE)
     sql = re.sub(
         r"\bTIMESTAMP\s+WITH\s+TIME\s+ZONE\b",
-        "TEXT",
+        "DATETIME",
         sql,
         flags=re.IGNORECASE,
     )
     sql = re.sub(
         r"\bTIMESTAMP\s+WITHOUT\s+TIME\s+ZONE\b",
-        "TEXT",
+        "DATETIME",
         sql,
         flags=re.IGNORECASE,
     )
     # Bare TIMESTAMP as column type (not in function names)
-    sql = re.sub(r"\bTIMESTAMP\b", "TEXT", sql, flags=re.IGNORECASE)
+    sql = re.sub(r"\bTIMESTAMP\b", "DATETIME", sql, flags=re.IGNORECASE)
 
     # JSON / binary / network / uuid
     sql = re.sub(r"\bJSONB\b", "TEXT", sql, flags=re.IGNORECASE)
