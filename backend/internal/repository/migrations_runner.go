@@ -10,7 +10,6 @@ import (
 	"io/fs"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/Wei-Shaw/sub2api/migrations"
 )
@@ -19,36 +18,11 @@ import (
 // - filename: 迁移文件名（主键）
 // - checksum: 文件内容 SHA256，用于检测迁移被篡改
 // - applied_at: 应用时间（PG: TIMESTAMPTZ / SQLite: TEXT）
-const schemaMigrationsTableDDLPostgres = `
-CREATE TABLE IF NOT EXISTS schema_migrations (
-	filename   TEXT PRIMARY KEY,
-	checksum   TEXT NOT NULL,
-	applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-`
-
 const schemaMigrationsTableDDLSQLite = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
 	filename   TEXT PRIMARY KEY,
 	checksum   TEXT NOT NULL,
 	applied_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-`
-
-const atlasSchemaRevisionsTableDDLPostgres = `
-CREATE TABLE IF NOT EXISTS atlas_schema_revisions (
-	version TEXT PRIMARY KEY,
-	description TEXT NOT NULL,
-	type INTEGER NOT NULL,
-	applied INTEGER NOT NULL DEFAULT 0,
-	total INTEGER NOT NULL DEFAULT 0,
-	executed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-	execution_time BIGINT NOT NULL DEFAULT 0,
-	error TEXT NULL,
-	error_stmt TEXT NULL,
-	hash TEXT NOT NULL DEFAULT '',
-	partial_hashes TEXT[] NULL,
-	operator_version TEXT NULL
 );
 `
 
@@ -69,11 +43,6 @@ CREATE TABLE IF NOT EXISTS atlas_schema_revisions (
 );
 `
 
-// migrationsAdvisoryLockID 是用于序列化迁移操作的 PostgreSQL Advisory Lock ID。
-// 在多实例部署场景下，该锁确保同一时间只有一个实例执行迁移。
-// 任何稳定的 int64 值都可以，只要不与同一数据库中的其他锁冲突即可。
-const migrationsAdvisoryLockID int64 = 694208311321144027
-const migrationsLockRetryInterval = 500 * time.Millisecond
 const nonTransactionalMigrationSuffix = "_notx.sql"
 const paymentOrdersOutTradeNoUniqueMigration = "120_enforce_payment_orders_out_trade_no_unique_notx.sql"
 const paymentOrdersOutTradeNoUniqueIndex = "paymentorder_out_trade_no_unique"
@@ -160,35 +129,18 @@ func applyMigrationsFS(ctx context.Context, db *sql.DB, fsys fs.FS) error {
 		return errors.New("nil sql db")
 	}
 
-	// 获取连接；PostgreSQL 下用 Advisory Lock 序列化多实例迁移。
-	// SQLite 是文件库，单写者模型下跳过 advisory lock。
+	// Keep all migration work on one SQLite connection. SQLite serializes schema
+	// writes itself, so no separate database advisory lock is required.
 	lockConn, err := db.Conn(ctx)
 	if err != nil {
 		return fmt.Errorf("acquire migrations lock connection: %w", err)
 	}
 	defer func() { _ = lockConn.Close() }()
-	sqlite := isSQLiteDB(db)
-	if !sqlite {
-		if err := pgAdvisoryLock(ctx, lockConn); err != nil {
-			return err
-		}
-		defer func() {
-			// 无论迁移是否成功，都要释放锁。
-			// 独立超时确保原 ctx 取消后仍会尝试释放，但数据库链路异常不会
-			// 无限阻塞进程退出。
-			unlockCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			_ = pgAdvisoryUnlock(unlockCtx, lockConn)
-		}()
-	}
+	sqlite := true
 
 	// 创建迁移记录表（如果不存在）。
 	// 该表记录所有已应用的迁移及其校验和。
-	schemaDDL := schemaMigrationsTableDDLPostgres
-	if sqlite {
-		schemaDDL = schemaMigrationsTableDDLSQLite
-	}
-	if _, err := lockConn.ExecContext(ctx, schemaDDL); err != nil {
+	if _, err := lockConn.ExecContext(ctx, schemaMigrationsTableDDLSQLite); err != nil {
 		return fmt.Errorf("create schema_migrations: %w", err)
 	}
 
@@ -325,15 +277,6 @@ func applyMigrationsFS(ctx context.Context, db *sql.DB, fsys fs.FS) error {
 	}
 
 	return nil
-}
-
-// isSQLiteDB reports whether db is backed by a SQLite driver (modernc/mattn/etc).
-func isSQLiteDB(db *sql.DB) bool {
-	if db == nil {
-		return false
-	}
-	name := strings.ToLower(fmt.Sprintf("%T", db.Driver()))
-	return strings.Contains(name, "sqlite")
 }
 
 // isSQLiteIgnorableMigrationError reports benign SQLite errors when replaying
@@ -480,11 +423,7 @@ func ensureAtlasBaselineAligned(ctx context.Context, db migrationConnection, fsy
 		return fmt.Errorf("check atlas_schema_revisions: %w", err)
 	}
 	if !hasAtlas {
-		atlasDDL := atlasSchemaRevisionsTableDDLPostgres
-		if sqlite {
-			atlasDDL = atlasSchemaRevisionsTableDDLSQLite
-		}
-		if _, err := db.ExecContext(ctx, atlasDDL); err != nil {
+		if _, err := db.ExecContext(ctx, atlasSchemaRevisionsTableDDLSQLite); err != nil {
 			return fmt.Errorf("create atlas_schema_revisions: %w", err)
 		}
 	}
@@ -502,14 +441,10 @@ func ensureAtlasBaselineAligned(ctx context.Context, db migrationConnection, fsy
 		return fmt.Errorf("atlas baseline version: %w", err)
 	}
 
-	executedAtExpr := "NOW()"
-	if sqlite {
-		executedAtExpr = "datetime('now')"
-	}
 	insertSQL := fmt.Sprintf(`
 		INSERT INTO atlas_schema_revisions (version, description, type, applied, total, executed_at, execution_time, hash)
 		VALUES ($1, $2, $3, 0, 0, %s, 0, $4)
-	`, executedAtExpr)
+	`, "datetime('now')")
 	if _, err := db.ExecContext(ctx, insertSQL, version, description, 1, hash); err != nil {
 		return fmt.Errorf("insert atlas baseline: %w", err)
 	}
@@ -744,42 +679,4 @@ func stripSQLLineComment(s string) string {
 		}
 	}
 	return strings.TrimSpace(strings.Join(lines, "\n"))
-}
-
-// pgAdvisoryLock 获取 PostgreSQL Advisory Lock。
-// Advisory Lock 是一种轻量级的锁机制，不与任何特定的数据库对象关联。
-// 它非常适合用于应用层面的分布式锁场景，如迁移序列化。
-type advisoryLockConnection interface {
-	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
-	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
-}
-
-func pgAdvisoryLock(ctx context.Context, db advisoryLockConnection) error {
-	ticker := time.NewTicker(migrationsLockRetryInterval)
-	defer ticker.Stop()
-
-	for {
-		var locked bool
-		if err := db.QueryRowContext(ctx, "SELECT pg_try_advisory_lock($1)", migrationsAdvisoryLockID).Scan(&locked); err != nil {
-			return fmt.Errorf("acquire migrations lock: %w", err)
-		}
-		if locked {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("acquire migrations lock: %w", ctx.Err())
-		case <-ticker.C:
-		}
-	}
-}
-
-// pgAdvisoryUnlock 释放 PostgreSQL Advisory Lock。
-// 必须在获取锁后确保释放，否则会阻塞其他实例的迁移操作。
-func pgAdvisoryUnlock(ctx context.Context, db advisoryLockConnection) error {
-	_, err := db.ExecContext(ctx, "SELECT pg_advisory_unlock($1)", migrationsAdvisoryLockID)
-	if err != nil {
-		return fmt.Errorf("release migrations lock: %w", err)
-	}
-	return nil
 }

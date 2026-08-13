@@ -68,17 +68,13 @@ func TestSchedulerOutboxRepositoryDeleteConsumedUpToUsesBoundedCTE(t *testing.T)
 
 	repo := &schedulerOutboxRepository{db: db}
 	const expectedSQL = `
-		WITH doomed AS (
-			SELECT id
-			FROM scheduler_outbox
-			WHERE id <= $1
-				AND created_at < NOW() - INTERVAL '10 seconds'
+		DELETE FROM scheduler_outbox
+		WHERE id IN (
+			SELECT id FROM scheduler_outbox
+			WHERE id <= $1 AND created_at < datetime('now', '-10 seconds')
 			ORDER BY id ASC
 			LIMIT $2
 		)
-		DELETE FROM scheduler_outbox o
-		USING doomed d
-		WHERE o.id = d.id
 	`
 	mock.ExpectExec(regexp.QuoteMeta(expectedSQL)).
 		WithArgs(int64(42), 5000).
@@ -111,10 +107,6 @@ func TestSchedulerOutboxRepositoryTryAcquireCleanupLock(t *testing.T) {
 	defer func() { _ = db.Close() }()
 
 	repo := &schedulerOutboxRepository{db: db}
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT pg_try_advisory_lock(hashtext('scheduler_outbox_cleanup'))")).
-		WillReturnRows(sqlmock.NewRows([]string{"pg_try_advisory_lock"}).AddRow(true))
-	mock.ExpectExec(regexp.QuoteMeta("SELECT pg_advisory_unlock(hashtext('scheduler_outbox_cleanup'))")).
-		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	lease, acquired, err := repo.TryAcquireCleanupLock(context.Background())
 	require.NoError(t, err)
@@ -132,8 +124,11 @@ func TestSchedulerOutboxRepositoryTryAcquireCleanupLockUnavailable(t *testing.T)
 	defer func() { _ = db.Close() }()
 
 	repo := &schedulerOutboxRepository{db: db}
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT pg_try_advisory_lock(hashtext('scheduler_outbox_cleanup'))")).
-		WillReturnRows(sqlmock.NewRows([]string{"pg_try_advisory_lock"}).AddRow(false))
+	firstLease, acquired, err := repo.TryAcquireCleanupLock(context.Background())
+	require.NoError(t, err)
+	require.True(t, acquired)
+	require.NotNil(t, firstLease)
+	defer firstLease.Release()
 
 	lease, acquired, err := repo.TryAcquireCleanupLock(context.Background())
 	require.NoError(t, err)

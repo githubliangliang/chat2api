@@ -19,7 +19,6 @@ import (
 
 	"entgo.io/ent/dialect"
 	entsql "entgo.io/ent/dialect/sql"
-	"github.com/lib/pq"
 	_ "modernc.org/sqlite" // SQLite driver (pure Go)
 )
 
@@ -97,34 +96,9 @@ func InitEnt(cfg *config.Config) (*ent.Client, *sql.DB, error) {
 	return client, drv.DB(), nil
 }
 
-// openEntDriver opens the SQL driver for the configured database dialect.
+// openEntDriver opens the application's SQLite driver.
 func openEntDriver(cfg *config.Config) (*entsql.Driver, error) {
-	if cfg.Database.IsSQLite() {
-		return openSQLiteDriver(cfg)
-	}
-	return openPostgresDriver(cfg)
-}
-
-func openPostgresDriver(cfg *config.Config) (*entsql.Driver, error) {
-	// 构建包含时区信息的数据库连接字符串 (DSN)。
-	// 时区信息会传递给 PostgreSQL，确保数据库层面的时间处理正确。
-	dsn := cfg.Database.DSNWithTimezone(cfg.Timezone)
-
-	// 使用 Ent 的 SQL 驱动打开 PostgreSQL 连接。
-	// dialect.Postgres 指定使用 PostgreSQL 方言进行 SQL 生成。
-	if cfg.Server.EnableServerTiming {
-		connector, err := pq.NewConnector(dsn)
-		if err != nil {
-			return nil, err
-		}
-		return entsql.OpenDB(dialect.Postgres, sql.OpenDB(newServerTimingConnector(connector))), nil
-	}
-
-	drv, err := entsql.Open(dialect.Postgres, dsn)
-	if err != nil {
-		return nil, err
-	}
-	return drv, nil
+	return openSQLiteDriver(cfg)
 }
 
 func openSQLiteDriver(cfg *config.Config) (*entsql.Driver, error) {
@@ -139,7 +113,7 @@ func openSQLiteDriver(cfg *config.Config) (*entsql.Driver, error) {
 	// Register PG-shaped helpers (NOW/GREATEST/LEAST) before opening connections.
 	registerSQLitePGCompatFunctions()
 
-	dsn := cfg.Database.DSNWithTimezone(cfg.Timezone)
+	dsn := fmt.Sprintf("file:%s?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_time_format=sqlite", path)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
@@ -161,25 +135,18 @@ func prepareSchema(ctx context.Context, drv *entsql.Driver, cfg *config.Config) 
 }
 
 func prepareSchemaWithFS(ctx context.Context, drv *entsql.Driver, cfg *config.Config, migrationsFS fs.FS) error {
-	if cfg.Database.IsSQLite() {
-		// Personal SQLite DBs may have been bootstrapped by Ent Schema.Create
-		// without schema_migrations. Always patch critical usage/billing objects,
-		// then apply migrations (duplicate column/index errors are ignored).
-		if err := EnsureSQLiteAuxTables(ctx, drv.DB()); err != nil {
-			return fmt.Errorf("sqlite aux tables: %w", err)
-		}
-		if err := applyMigrationsFS(ctx, drv.DB(), migrationsFS); err != nil {
-			return err
-		}
-		// Re-run aux after migrations so newly created tables get indexes/stubs.
-		if err := EnsureSQLiteAuxTables(ctx, drv.DB()); err != nil {
-			return fmt.Errorf("sqlite aux tables (post-migrate): %w", err)
-		}
-		return nil
+	// Personal SQLite DBs may have been bootstrapped by Ent Schema.Create
+	// without schema_migrations. Always patch critical usage/billing objects,
+	// then apply migrations (duplicate column/index errors are ignored).
+	if err := EnsureSQLiteAuxTables(ctx, drv.DB()); err != nil {
+		return fmt.Errorf("sqlite aux tables: %w", err)
 	}
-
 	if err := applyMigrationsFS(ctx, drv.DB(), migrationsFS); err != nil {
 		return err
+	}
+	// Re-run aux after migrations so newly created tables get indexes/stubs.
+	if err := EnsureSQLiteAuxTables(ctx, drv.DB()); err != nil {
+		return fmt.Errorf("sqlite aux tables (post-migrate): %w", err)
 	}
 	return nil
 }

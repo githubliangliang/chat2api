@@ -21,11 +21,10 @@ import (
 
 	"entgo.io/ent/dialect"
 	entsql "entgo.io/ent/dialect/sql"
-	_ "github.com/lib/pq"
 	"github.com/redis/go-redis/v9"
-	_ "modernc.org/sqlite"
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
+	_ "modernc.org/sqlite"
 )
 
 // Config paths
@@ -90,7 +89,7 @@ type SetupConfig struct {
 }
 
 type DatabaseConfig struct {
-	// Driver: postgres (default) or sqlite
+	// Driver is retained for config compatibility; SQLite is the only target.
 	Driver string `json:"driver" yaml:"driver"`
 	// Path: SQLite database file path (when driver=sqlite)
 	Path     string `json:"path" yaml:"path"`
@@ -104,12 +103,7 @@ type DatabaseConfig struct {
 
 // IsSQLite reports whether setup targets SQLite.
 func (d *DatabaseConfig) IsSQLite() bool {
-	switch strings.ToLower(strings.TrimSpace(d.Driver)) {
-	case "sqlite", "sqlite3":
-		return true
-	default:
-		return false
-	}
+	return true
 }
 
 // SQLitePath returns the sqlite file path with default.
@@ -217,17 +211,6 @@ func NeedsSetup() bool {
 	return true
 }
 
-func buildPostgresDSN(cfg *DatabaseConfig, dbName string) string {
-	return fmt.Sprintf(
-		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
-		cfg.Host, cfg.Port, cfg.User, cfg.Password, dbName, cfg.SSLMode,
-	)
-}
-
-func buildDatabaseConnectionDSNs(cfg *DatabaseConfig) (bootstrapDSN, targetDSN string) {
-	return buildPostgresDSN(cfg, "postgres"), buildPostgresDSN(cfg, cfg.DBName)
-}
-
 func buildSQLiteDSN(cfg *DatabaseConfig) string {
 	path := cfg.SQLitePath()
 	return fmt.Sprintf("file:%s?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_time_format=sqlite", path)
@@ -235,10 +218,7 @@ func buildSQLiteDSN(cfg *DatabaseConfig) string {
 
 // TestDatabaseConnection tests the database connection and creates database if not exists
 func TestDatabaseConnection(cfg *DatabaseConfig) error {
-	if cfg.IsSQLite() {
-		return testSQLiteConnection(cfg)
-	}
-	return testPostgresConnection(cfg)
+	return testSQLiteConnection(cfg)
 }
 
 func testSQLiteConnection(cfg *DatabaseConfig) error {
@@ -262,79 +242,6 @@ func testSQLiteConnection(cfg *DatabaseConfig) error {
 	if err := db.PingContext(ctx); err != nil {
 		return fmt.Errorf("sqlite ping failed: %w", err)
 	}
-	return nil
-}
-
-func testPostgresConnection(cfg *DatabaseConfig) error {
-	// First, connect to the default 'postgres' database to check/create target database.
-	// Connecting to cfg.DBName here fails when the target database has not been
-	// created yet, so the bootstrap connection must use PostgreSQL's maintenance DB.
-	defaultDSN, targetDSN := buildDatabaseConnectionDSNs(cfg)
-
-	db, err := sql.Open("postgres", defaultDSN)
-	if err != nil {
-		return fmt.Errorf("failed to connect to PostgreSQL: %w", err)
-	}
-
-	defer func() {
-		if db == nil {
-			return
-		}
-		if err := db.Close(); err != nil {
-			logger.LegacyPrintf("setup", "failed to close postgres connection: %v", err)
-		}
-	}()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if err := db.PingContext(ctx); err != nil {
-		return fmt.Errorf("ping failed: %w", err)
-	}
-
-	// Check if target database exists
-	var exists bool
-	row := db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = $1)", cfg.DBName)
-	if err := row.Scan(&exists); err != nil {
-		return fmt.Errorf("failed to check database existence: %w", err)
-	}
-
-	// Create database if not exists
-	if !exists {
-		// 注意：数据库名不能参数化，依赖前置输入校验保障安全。
-		// Note: Database names cannot be parameterized, but we've already validated cfg.DBName
-		// in the handler using validateDBName() which only allows [a-zA-Z][a-zA-Z0-9_]*
-		_, err := db.ExecContext(ctx, fmt.Sprintf("CREATE DATABASE %s", cfg.DBName))
-		if err != nil {
-			return fmt.Errorf("failed to create database '%s': %w", cfg.DBName, err)
-		}
-		logger.LegacyPrintf("setup", "Database '%s' created successfully", cfg.DBName)
-	}
-
-	// Now connect to the target database to verify
-	if err := db.Close(); err != nil {
-		logger.LegacyPrintf("setup", "failed to close postgres connection: %v", err)
-	}
-	db = nil
-
-	targetDB, err := sql.Open("postgres", targetDSN)
-	if err != nil {
-		return fmt.Errorf("failed to connect to database '%s': %w", cfg.DBName, err)
-	}
-
-	defer func() {
-		if err := targetDB.Close(); err != nil {
-			logger.LegacyPrintf("setup", "failed to close postgres connection: %v", err)
-		}
-	}()
-
-	ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel2()
-
-	if err := targetDB.PingContext(ctx2); err != nil {
-		return fmt.Errorf("ping target database failed: %w", err)
-	}
-
 	return nil
 }
 
@@ -433,25 +340,7 @@ func createInstallLock() error {
 }
 
 func initializeDatabase(cfg *SetupConfig) error {
-	if cfg.Database.IsSQLite() {
-		return initializeSQLiteSchema(cfg)
-	}
-
-	dsn := buildPostgresDSN(&cfg.Database, cfg.Database.DBName)
-	db, err := sql.Open("postgres", dsn)
-	if err != nil {
-		return err
-	}
-
-	defer func() {
-		if err := db.Close(); err != nil {
-			logger.LegacyPrintf("setup", "failed to close postgres connection: %v", err)
-		}
-	}()
-
-	migrationCtx, cancel := context.WithTimeout(context.Background(), cfg.migrationTimeout())
-	defer cancel()
-	return repository.ApplyMigrations(migrationCtx, db)
+	return initializeSQLiteSchema(cfg)
 }
 
 // initializeSQLiteSchema creates tables via Ent Schema.Create (PG SQL migrations are not used).
@@ -498,15 +387,7 @@ func (cfg *SetupConfig) migrationTimeout() time.Duration {
 }
 
 func createAdminUser(cfg *SetupConfig) (bool, string, error) {
-	var (
-		db  *sql.DB
-		err error
-	)
-	if cfg.Database.IsSQLite() {
-		db, err = sql.Open("sqlite", buildSQLiteDSN(&cfg.Database))
-	} else {
-		db, err = sql.Open("postgres", buildPostgresDSN(&cfg.Database, cfg.Database.DBName))
-	}
+	db, err := sql.Open("sqlite", buildSQLiteDSN(&cfg.Database))
 	if err != nil {
 		return false, "", err
 	}
@@ -698,7 +579,7 @@ func AutoSetupFromEnv() error {
 	// Build config from environment variables
 	redisEnabledEnv := strings.ToLower(strings.TrimSpace(getEnvOrDefault("REDIS_ENABLED", "true")))
 	redisEnabled := redisEnabledEnv != "false" && redisEnabledEnv != "0" && redisEnabledEnv != "no"
-	dbDriver := strings.ToLower(strings.TrimSpace(getEnvOrDefault("DATABASE_DRIVER", "postgres")))
+	dbDriver := "sqlite"
 
 	cfg := &SetupConfig{
 		Database: DatabaseConfig{

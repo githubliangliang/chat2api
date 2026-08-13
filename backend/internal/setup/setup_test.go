@@ -226,25 +226,16 @@ func TestWriteConfigFileIncludesRedisUsername(t *testing.T) {
 	}
 }
 
-func TestBuildDatabaseConnectionDSNsUsesPostgresForBootstrap(t *testing.T) {
+func TestDatabaseConfigUsesSQLiteAsOnlyTarget(t *testing.T) {
 	cfg := &DatabaseConfig{
-		Host:     "db",
-		Port:     5432,
-		User:     "sub2api",
-		Password: "secret",
-		DBName:   "sub2api",
-		SSLMode:  "disable",
+		Driver: "postgres",
+		Path:   "/tmp/sub2api.db",
 	}
 
-	bootstrapDSN, targetDSN := buildDatabaseConnectionDSNs(cfg)
-
-	if !strings.Contains(bootstrapDSN, "dbname=postgres") {
-		t.Fatalf("bootstrap DSN = %q, want default postgres database", bootstrapDSN)
+	if !cfg.IsSQLite() {
+		t.Fatal("legacy driver value must still select SQLite")
 	}
-	if strings.Contains(bootstrapDSN, "dbname=sub2api") {
-		t.Fatalf("bootstrap DSN = %q, should not connect to target database before checking/creating it", bootstrapDSN)
-	}
-	if !strings.Contains(targetDSN, "dbname=sub2api") {
-		t.Fatalf("target DSN = %q, want configured database", targetDSN)
+	if dsn := buildSQLiteDSN(cfg); !strings.Contains(dsn, "file:/tmp/sub2api.db") {
+		t.Fatalf("SQLite DSN = %q, want configured database path", dsn)
 	}
 }

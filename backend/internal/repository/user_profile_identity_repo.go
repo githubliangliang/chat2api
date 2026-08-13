@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"hash/fnv"
 	"reflect"
 	"sort"
 	"strings"
@@ -12,7 +11,6 @@ import (
 	"time"
 	"unsafe"
 
-	"entgo.io/ent/dialect"
 	entsql "entgo.io/ent/dialect/sql"
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/authidentity"
@@ -207,27 +205,8 @@ func normalizeLockKeys(keys ...string) []string {
 	return normalized
 }
 
-func advisoryLockHash(key string) int64 {
-	hasher := fnv.New64a()
-	_, _ = hasher.Write([]byte(key))
-	return int64(hasher.Sum64())
-}
-
-func lockRepositoryScopedKeys(ctx context.Context, client *dbent.Client, exec sqlQueryExecutor, keys ...string) (func(), error) {
+func lockRepositoryScopedKeys(_ context.Context, _ *dbent.Client, _ sqlQueryExecutor, keys ...string) (func(), error) {
 	release := repositoryScopedKeyLocks.lock(keys...)
-	normalized := normalizeLockKeys(keys...)
-	if len(normalized) == 0 || client == nil || exec == nil || client.Driver().Dialect() != dialect.Postgres {
-		return release, nil
-	}
-
-	for _, key := range normalized {
-		rows, err := exec.QueryContext(ctx, "SELECT pg_advisory_xact_lock($1)", advisoryLockHash(key))
-		if err != nil {
-			release()
-			return nil, err
-		}
-		_ = rows.Close()
-	}
 	return release, nil
 }
 

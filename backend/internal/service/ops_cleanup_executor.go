@@ -96,7 +96,7 @@ func deleteOldRowsByID(
 
 	where := fmt.Sprintf("%s < $1", timeColumn)
 	if castCutoffToDate {
-		where = fmt.Sprintf("%s < $1::date", timeColumn)
+		where = fmt.Sprintf("date(%s) < date($1)", timeColumn)
 	}
 
 	q := fmt.Sprintf(`
@@ -131,7 +131,7 @@ WHERE id IN (SELECT id FROM batch)
 	return total, nil
 }
 
-// truncateOpsTable 用 TRUNCATE TABLE 清空指定表，先 SELECT COUNT(*) 取得清空前行数用于 heartbeat。
+// truncateOpsTable clears a table and returns its previous row count for the heartbeat.
 func truncateOpsTable(ctx context.Context, db *sql.DB, table string) (int64, error) {
 	if db == nil {
 		return 0, nil
@@ -146,7 +146,7 @@ func truncateOpsTable(ctx context.Context, db *sql.DB, table string) (int64, err
 	if count == 0 {
 		return 0, nil
 	}
-	if _, err := db.ExecContext(ctx, fmt.Sprintf("TRUNCATE TABLE %s", table)); err != nil {
+	if _, err := db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s", table)); err != nil {
 		if isMissingRelationError(err) {
 			return 0, nil
 		}
@@ -160,5 +160,6 @@ func isMissingRelationError(err error) bool {
 		return false
 	}
 	s := strings.ToLower(err.Error())
-	return strings.Contains(s, "does not exist") && strings.Contains(s, "relation")
+	return (strings.Contains(s, "does not exist") && strings.Contains(s, "relation")) ||
+		strings.Contains(s, "no such table")
 }

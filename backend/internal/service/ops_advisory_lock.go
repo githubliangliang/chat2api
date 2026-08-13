@@ -3,9 +3,8 @@ package service
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"hash/fnv"
-	"time"
+	"sync"
 )
 
 func hashAdvisoryLockID(key string) int64 {
@@ -14,39 +13,45 @@ func hashAdvisoryLockID(key string) int64 {
 	return int64(h.Sum64())
 }
 
+var dbLeaderLocks = newProcessLeaderLockRegistry()
+
+type processLeaderLockRegistry struct {
+	mu   sync.Mutex
+	held map[int64]struct{}
+}
+
+func newProcessLeaderLockRegistry() *processLeaderLockRegistry {
+	return &processLeaderLockRegistry{held: make(map[int64]struct{})}
+}
+
+func (r *processLeaderLockRegistry) tryAcquire(lockID int64) (func(), bool) {
+	r.mu.Lock()
+	if _, exists := r.held[lockID]; exists {
+		r.mu.Unlock()
+		return nil, false
+	}
+	r.held[lockID] = struct{}{}
+	r.mu.Unlock()
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			r.mu.Lock()
+			delete(r.held, lockID)
+			r.mu.Unlock()
+		})
+	}, true
+}
+
 func tryAcquireDBAdvisoryLock(ctx context.Context, db *sql.DB, lockID int64) (func(), bool) {
 	release, acquired, _ := tryAcquireDBAdvisoryLockWithError(ctx, db, lockID)
 	return release, acquired
 }
 
-func tryAcquireDBAdvisoryLockWithError(ctx context.Context, db *sql.DB, lockID int64) (func(), bool, error) {
+func tryAcquireDBAdvisoryLockWithError(_ context.Context, db *sql.DB, lockID int64) (func(), bool, error) {
 	if db == nil {
 		return nil, false, nil
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
-	conn, err := db.Conn(ctx)
-	if err != nil {
-		return nil, false, fmt.Errorf("open advisory-lock connection: %w", err)
-	}
-
-	acquired := false
-	if err := conn.QueryRowContext(ctx, "SELECT pg_try_advisory_lock($1)", lockID).Scan(&acquired); err != nil {
-		_ = conn.Close()
-		return nil, false, fmt.Errorf("query advisory lock: %w", err)
-	}
-	if !acquired {
-		_ = conn.Close()
-		return nil, false, nil
-	}
-
-	release := func() {
-		unlockCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		_, _ = conn.ExecContext(unlockCtx, "SELECT pg_advisory_unlock($1)", lockID)
-		_ = conn.Close()
-	}
-	return release, true, nil
+	release, acquired := dbLeaderLocks.tryAcquire(lockID)
+	return release, acquired, nil
 }

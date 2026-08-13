@@ -7,20 +7,17 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"hash/fnv"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
-	"entgo.io/ent/dialect"
+	entsql "entgo.io/ent/dialect/sql"
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/identityadoptiondecision"
 	"github.com/Wei-Shaw/sub2api/ent/pendingauthsession"
 	dbpredicate "github.com/Wei-Shaw/sub2api/ent/predicate"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
-
-	entsql "entgo.io/ent/dialect/sql"
 )
 
 var (
@@ -163,28 +160,8 @@ func normalizeAuthPendingIdentityLockKeys(keys ...string) []string {
 	return normalized
 }
 
-func authPendingIdentityAdvisoryLockHash(key string) int64 {
-	hasher := fnv.New64a()
-	_, _ = hasher.Write([]byte(key))
-	return int64(hasher.Sum64())
-}
-
-func lockAuthPendingIdentityKeys(ctx context.Context, client *dbent.Client, keys ...string) (func(), error) {
+func lockAuthPendingIdentityKeys(_ context.Context, _ *dbent.Client, keys ...string) (func(), error) {
 	release := authPendingIdentityScopedKeyLocks.lock(keys...)
-	normalized := normalizeAuthPendingIdentityLockKeys(keys...)
-	if len(normalized) == 0 || client == nil || client.Driver().Dialect() != dialect.Postgres {
-		return release, nil
-	}
-
-	for _, key := range normalized {
-		var rows entsql.Rows
-		if err := client.Driver().Query(ctx, "SELECT pg_advisory_xact_lock($1)", []any{authPendingIdentityAdvisoryLockHash(key)}, &rows); err != nil {
-			release()
-			return nil, err
-		}
-		_ = rows.Close()
-	}
-
 	return release, nil
 }
 

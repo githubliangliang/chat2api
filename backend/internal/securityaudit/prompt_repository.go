@@ -10,11 +10,6 @@ import (
 	"time"
 )
 
-const (
-	promptAuditAdmissionLockKey int64 = 579147893221901921
-	promptAuditConfigLockKey    int64 = 579147893221901922
-)
-
 var (
 	ErrQueueFull          = errors.New("prompt audit queue full")
 	ErrQueueAdmissionBusy = errors.New("prompt audit queue admission busy")
@@ -95,13 +90,6 @@ func (r *PostgreSQLRepository) CreateStagingWithCapacity(ctx context.Context, sn
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	var locked bool
-	if err := tx.QueryRowContext(ctx, `SELECT pg_try_advisory_xact_lock($1)`, promptAuditAdmissionLockKey).Scan(&locked); err != nil {
-		return nil, err
-	}
-	if !locked {
-		return nil, ErrQueueAdmissionBusy
-	}
 	var active int
 	if err := tx.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM prompt_audit_jobs

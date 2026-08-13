@@ -24,8 +24,7 @@ type SchedulerOutboxRepository interface {
 	TryAcquireCleanupLock(ctx context.Context) (SchedulerOutboxCleanupLease, bool, error)
 }
 
-// SchedulerOutboxCleanupLease holds the PostgreSQL advisory lock used by
-// scheduler outbox cleanup.
+// SchedulerOutboxCleanupLease holds the process-local cleanup lock.
 type SchedulerOutboxCleanupLease interface {
 	Release()
 }

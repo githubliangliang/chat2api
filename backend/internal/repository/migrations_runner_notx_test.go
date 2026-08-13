@@ -65,10 +65,6 @@ func TestApplyMigrationsFS_NonTransactionalMigration(t *testing.T) {
 	mock.ExpectExec("INSERT INTO schema_migrations \\(filename, checksum\\) VALUES \\(\\$1, \\$2\\)").
 		WithArgs("001_add_idx_notx.sql", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectExec("SELECT pg_advisory_unlock\\(\\$1\\)").
-		WithArgs(migrationsAdvisoryLockID).
-		WillReturnResult(sqlmock.NewResult(0, 1))
-
 	fsys := fstest.MapFS{
 		"001_add_idx_notx.sql": &fstest.MapFile{
 			Data: []byte("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_t_a ON t(a);"),
@@ -96,9 +92,6 @@ func TestApplyMigrationsFS_NonTransactionalMigration_MultiStatements(t *testing.
 	mock.ExpectExec("INSERT INTO schema_migrations \\(filename, checksum\\) VALUES \\(\\$1, \\$2\\)").
 		WithArgs("001_add_multi_idx_notx.sql", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectExec("SELECT pg_advisory_unlock\\(\\$1\\)").
-		WithArgs(migrationsAdvisoryLockID).
-		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	fsys := fstest.MapFS{
 		"001_add_multi_idx_notx.sql": &fstest.MapFile{
@@ -125,26 +118,17 @@ func TestApplyMigrationsFS_NonTransactionalMigration_LatestAPIKeyIPIndexDropsInv
 	mock.ExpectQuery("SELECT checksum FROM schema_migrations WHERE filename = \\$1").
 		WithArgs(latestAPIKeyIPIndexMigration).
 		WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery("SELECT EXISTS \\(").
-		WithArgs(latestAPIKeyIPIndex).
-		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
-	mock.ExpectExec("DROP INDEX CONCURRENTLY IF EXISTS idx_usage_logs_api_key_latest_ip").
-		WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_usage_logs_api_key_latest_ip").
+	mock.ExpectExec("CREATE INDEX IF NOT EXISTS idx_usage_logs_api_key_latest_ip").
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("INSERT INTO schema_migrations \\(filename, checksum\\) VALUES \\(\\$1, \\$2\\)").
 		WithArgs(latestAPIKeyIPIndexMigration, sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectExec("SELECT pg_advisory_unlock\\(\\$1\\)").
-		WithArgs(migrationsAdvisoryLockID).
-		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	fsys := fstest.MapFS{
 		latestAPIKeyIPIndexMigration: &fstest.MapFile{
 			Data: []byte(`
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_usage_logs_api_key_latest_ip
+CREATE INDEX IF NOT EXISTS idx_usage_logs_api_key_latest_ip
     ON usage_logs (api_key_id, created_at DESC, id DESC)
-    INCLUDE (ip_address)
     WHERE ip_address IS NOT NULL AND ip_address <> '';
 `),
 		},
@@ -164,23 +148,15 @@ func TestApplyMigrationsFS_NonTransactionalMigration_UsageModelMismatchIndexDrop
 	mock.ExpectQuery("SELECT checksum FROM schema_migrations WHERE filename = \\$1").
 		WithArgs(usageLogsUpstreamModelMismatchIndexMigration).
 		WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery("SELECT EXISTS \\(").
-		WithArgs(usageLogsUpstreamModelMismatchIndex).
-		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
-	mock.ExpectExec("DROP INDEX CONCURRENTLY IF EXISTS idx_usage_logs_upstream_model_mismatch_created_at").
-		WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_usage_logs_upstream_model_mismatch_created_at").
+	mock.ExpectExec("CREATE INDEX IF NOT EXISTS idx_usage_logs_upstream_model_mismatch_created_at").
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("INSERT INTO schema_migrations \\(filename, checksum\\) VALUES \\(\\$1, \\$2\\)").
 		WithArgs(usageLogsUpstreamModelMismatchIndexMigration, sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectExec("SELECT pg_advisory_unlock\\(\\$1\\)").
-		WithArgs(migrationsAdvisoryLockID).
-		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	fsys := fstest.MapFS{
 		usageLogsUpstreamModelMismatchIndexMigration: &fstest.MapFile{Data: []byte(`
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_usage_logs_upstream_model_mismatch_created_at
+CREATE INDEX IF NOT EXISTS idx_usage_logs_upstream_model_mismatch_created_at
     ON usage_logs (created_at DESC, id DESC)
     WHERE upstream_model_mismatch IS TRUE;
 `)},
@@ -202,9 +178,6 @@ func TestApplyMigrationsFS_PaymentOrdersOutTradeNoUniqueMigration_FailsFastOnDup
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery("SELECT out_trade_no, COUNT\\(\\*\\) AS duplicate_count FROM payment_orders").
 		WillReturnRows(sqlmock.NewRows([]string{"out_trade_no", "duplicate_count"}).AddRow("dup-out-trade-no", 2))
-	mock.ExpectExec("SELECT pg_advisory_unlock\\(\\$1\\)").
-		WithArgs(migrationsAdvisoryLockID).
-		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	fsys := fstest.MapFS{
 		"120_enforce_payment_orders_out_trade_no_unique_notx.sql": &fstest.MapFile{
@@ -236,30 +209,22 @@ func TestApplyMigrationsFS_PaymentOrdersOutTradeNoUniqueMigration_DropsInvalidIn
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery("SELECT out_trade_no, COUNT\\(\\*\\) AS duplicate_count FROM payment_orders").
 		WillReturnRows(sqlmock.NewRows([]string{"out_trade_no", "duplicate_count"}))
-	mock.ExpectQuery("SELECT EXISTS \\(").
-		WithArgs("paymentorder_out_trade_no_unique").
-		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
-	mock.ExpectExec("DROP INDEX CONCURRENTLY IF EXISTS paymentorder_out_trade_no_unique").
+	mock.ExpectExec("CREATE UNIQUE INDEX IF NOT EXISTS paymentorder_out_trade_no_unique").
 		WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec("CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS paymentorder_out_trade_no_unique").
-		WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec("DROP INDEX CONCURRENTLY IF EXISTS paymentorder_out_trade_no").
+	mock.ExpectExec("DROP INDEX IF EXISTS paymentorder_out_trade_no").
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("INSERT INTO schema_migrations \\(filename, checksum\\) VALUES \\(\\$1, \\$2\\)").
 		WithArgs("120_enforce_payment_orders_out_trade_no_unique_notx.sql", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectExec("SELECT pg_advisory_unlock\\(\\$1\\)").
-		WithArgs(migrationsAdvisoryLockID).
-		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	fsys := fstest.MapFS{
 		"120_enforce_payment_orders_out_trade_no_unique_notx.sql": &fstest.MapFile{
 			Data: []byte(`
-CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS paymentorder_out_trade_no_unique
+CREATE UNIQUE INDEX IF NOT EXISTS paymentorder_out_trade_no_unique
     ON payment_orders (out_trade_no)
     WHERE out_trade_no <> '';
 
-DROP INDEX CONCURRENTLY IF EXISTS paymentorder_out_trade_no;
+DROP INDEX IF EXISTS paymentorder_out_trade_no;
 `),
 		},
 	}
@@ -278,24 +243,16 @@ func TestApplyMigrationsFS_SchedulerOutboxPendingDedupKeyMigration_DropsInvalidI
 	mock.ExpectQuery("SELECT checksum FROM schema_migrations WHERE filename = \\$1").
 		WithArgs("153_scheduler_outbox_pending_dedup_key_index_notx.sql").
 		WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery("SELECT EXISTS \\(").
-		WithArgs("idx_scheduler_outbox_pending_dedup_key").
-		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
-	mock.ExpectExec("DROP INDEX CONCURRENTLY IF EXISTS idx_scheduler_outbox_pending_dedup_key").
-		WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec("CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_scheduler_outbox_pending_dedup_key").
+	mock.ExpectExec("CREATE UNIQUE INDEX IF NOT EXISTS idx_scheduler_outbox_pending_dedup_key").
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("INSERT INTO schema_migrations \\(filename, checksum\\) VALUES \\(\\$1, \\$2\\)").
 		WithArgs("153_scheduler_outbox_pending_dedup_key_index_notx.sql", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectExec("SELECT pg_advisory_unlock\\(\\$1\\)").
-		WithArgs(migrationsAdvisoryLockID).
-		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	fsys := fstest.MapFS{
 		"153_scheduler_outbox_pending_dedup_key_index_notx.sql": &fstest.MapFile{
 			Data: []byte(`
-CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_scheduler_outbox_pending_dedup_key
+CREATE UNIQUE INDEX IF NOT EXISTS idx_scheduler_outbox_pending_dedup_key
     ON scheduler_outbox (dedup_key)
     WHERE dedup_key IS NOT NULL;
 `),
@@ -326,9 +283,6 @@ func TestApplyMigrationsFS_TransactionalMigration(t *testing.T) {
 		WithArgs("001_add_col.sql", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
-	mock.ExpectExec("SELECT pg_advisory_unlock\\(\\$1\\)").
-		WithArgs(migrationsAdvisoryLockID).
-		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	fsys := fstest.MapFS{
 		"001_add_col.sql": &fstest.MapFile{
@@ -342,17 +296,14 @@ func TestApplyMigrationsFS_TransactionalMigration(t *testing.T) {
 }
 
 func prepareMigrationsBootstrapExpectations(mock sqlmock.Sqlmock) {
-	mock.ExpectQuery("SELECT pg_try_advisory_lock\\(\\$1\\)").
-		WithArgs(migrationsAdvisoryLockID).
-		WillReturnRows(sqlmock.NewRows([]string{"pg_try_advisory_lock"}).AddRow(true))
 	mock.ExpectExec("CREATE TABLE IF NOT EXISTS schema_migrations").
 		WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectQuery("SELECT EXISTS \\(").
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM sqlite_master").
 		WithArgs("schema_migrations").
-		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
-	mock.ExpectQuery("SELECT EXISTS \\(").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM sqlite_master").
 		WithArgs("atlas_schema_revisions").
-		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM atlas_schema_revisions").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 }
