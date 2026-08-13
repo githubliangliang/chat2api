@@ -2036,6 +2036,7 @@ func (m *mockConcurrencyService) GetAccountWaitingCount(ctx context.Context, acc
 
 type mockConcurrencyCache struct {
 	acquireAccountCalls int
+	releaseAccountCalls int
 	loadBatchCalls      int
 	acquireResults      map[int64]bool
 	loadBatchErr        error
@@ -2055,6 +2056,7 @@ func (m *mockConcurrencyCache) AcquireAccountSlot(ctx context.Context, accountID
 }
 
 func (m *mockConcurrencyCache) ReleaseAccountSlot(ctx context.Context, accountID int64, requestID string) error {
+	m.releaseAccountCalls++
 	return nil
 }
 

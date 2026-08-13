@@ -26,7 +26,7 @@ func TestBuildOpsErrorLogsWhere_UserScopedFilters(t *testing.T) {
 		"e.api_key_id = $",
 		"COALESCE(e.requested_model, e.model, '') = $",
 		"COALESCE(e.is_count_tokens, false) = false",
-		"e.error_phase = ANY($",
+		"e.error_phase IN ($",
 		"e.error_type = ANY($",
 	} {
 		if !strings.Contains(where, want) {
@@ -34,7 +34,7 @@ func TestBuildOpsErrorLogsWhere_UserScopedFilters(t *testing.T) {
 		}
 	}
 	if len(args) != 5 {
-		t.Fatalf("expected 5 args, got %d", len(args))
+		t.Fatalf("expected 5 scalar args, got %d", len(args))
 	}
 }
 
@@ -119,7 +119,7 @@ func TestBuildOpsErrorLogsWhere_CyberPolicyStatusExemption(t *testing.T) {
 	if strings.Contains(whereProviderHealth, "status_code") {
 		t.Fatalf("provider-health ANY filter must expose recovered inference and credential rows\nfull: %s", whereProviderHealth)
 	}
-	if !strings.Contains(whereProviderHealth, "e.error_phase = ANY($") {
+	if !strings.Contains(whereProviderHealth, "e.error_phase IN ($") {
 		t.Fatalf("provider-health filter must preserve distinct phase values\nfull: %s", whereProviderHealth)
 	}
 

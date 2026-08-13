@@ -11,11 +11,11 @@
 package repository
 
 import (
-	"fmt"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -1325,14 +1325,15 @@ func (r *accountRepository) BatchUpdateLastUsed(ctx context.Context, updates map
 
 	idx := 1
 	for id, ts := range updates {
-		caseSQL += " WHEN $" + itoa(idx) + " THEN $" + itoa(idx+1) + "::timestamptz"
+		caseSQL += " WHEN $" + itoa(idx) + " THEN $" + itoa(idx+1)
 		args = append(args, id, ts)
 		ids = append(ids, id)
 		idx += 2
 	}
 
-	caseSQL += " END, updated_at = NOW() WHERE id = ANY($" + itoa(idx) + ") AND deleted_at IS NULL"
-	args = append(args, pq.Array(ids))
+	inClause, inArgs := sqlInt64In("id", ids, idx)
+	caseSQL += " END, updated_at = NOW() WHERE " + inClause + " AND deleted_at IS NULL"
+	args = append(args, inArgs...)
 
 	_, err := r.sql.ExecContext(ctx, caseSQL, args...)
 	if err != nil {

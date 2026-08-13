@@ -209,6 +209,106 @@ func TestGatewaySelectAccountWithLoadAwareness_HydratesSelectedAccountFromSchedu
 	}
 }
 
+func TestGatewaySelectAccountWithLoadAwareness_SkipsFreshlyDisabledSnapshotAccount(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*Account)
+	}{
+		{
+			name: "manually unschedulable",
+			mutate: func(account *Account) {
+				account.Schedulable = false
+			},
+		},
+		{
+			name: "manually disabled",
+			mutate: func(account *Account) {
+				account.Status = StatusDisabled
+			},
+		},
+		{
+			name: "local quota exhausted",
+			mutate: func(account *Account) {
+				account.Extra = map[string]any{"quota_limit": 10.0, "quota_used": 10.0}
+			},
+		},
+	}
+
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stalePrimary := &Account{ID: int64(19 + i*10), Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0}
+			staleBackup := &Account{ID: stalePrimary.ID + 1, Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 10}
+			dbPrimary := *stalePrimary
+			tt.mutate(&dbPrimary)
+			dbBackup := *staleBackup
+
+			cache := &snapshotHydrationCache{
+				snapshot: []*Account{stalePrimary, staleBackup},
+				accounts: map[int64]*Account{stalePrimary.ID: stalePrimary, staleBackup.ID: staleBackup},
+			}
+			cfg := testConfig()
+			cfg.Gateway.Scheduling.LoadBatchEnabled = true
+			concurrencyCache := &mockConcurrencyCache{}
+			svc := &GatewayService{
+				accountRepo:        stubOpenAIAccountRepo{accounts: []Account{dbPrimary, dbBackup}},
+				schedulerSnapshot:  NewSchedulerSnapshotService(cache, nil, nil, nil, nil),
+				cache:              &mockGatewayCacheForPlatform{},
+				cfg:                cfg,
+				concurrencyService: NewConcurrencyService(concurrencyCache),
+			}
+
+			result, err := svc.SelectAccountWithLoadAwareness(context.Background(), nil, "", "claude-3-5-sonnet-20241022", nil, "", 0)
+			if err != nil {
+				t.Fatalf("SelectAccountWithLoadAwareness error: %v", err)
+			}
+			if result == nil || result.Account == nil {
+				t.Fatalf("expected selected account")
+			}
+			if result.Account.ID != dbBackup.ID {
+				t.Fatalf("expected healthy backup account %d, got %d", dbBackup.ID, result.Account.ID)
+			}
+			if concurrencyCache.releaseAccountCalls != 1 {
+				t.Fatalf("expected stale account slot to be released once, got %d", concurrencyCache.releaseAccountCalls)
+			}
+		})
+	}
+}
+
+func TestGatewaySelectAccountWithLoadAwareness_WaitPlanSkipsFreshlyDisabledSnapshotAccount(t *testing.T) {
+	stalePrimary := &Account{ID: 59, Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0}
+	staleBackup := &Account{ID: 60, Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 10}
+	dbPrimary := *stalePrimary
+	dbPrimary.Status = StatusDisabled
+	dbBackup := *staleBackup
+	cache := &snapshotHydrationCache{
+		snapshot: []*Account{stalePrimary, staleBackup},
+		accounts: map[int64]*Account{stalePrimary.ID: stalePrimary, staleBackup.ID: staleBackup},
+	}
+	cfg := testConfig()
+	cfg.Gateway.Scheduling.LoadBatchEnabled = true
+	svc := &GatewayService{
+		accountRepo:       stubOpenAIAccountRepo{accounts: []Account{dbPrimary, dbBackup}},
+		schedulerSnapshot: NewSchedulerSnapshotService(cache, nil, nil, nil, nil),
+		cache:             &mockGatewayCacheForPlatform{},
+		cfg:               cfg,
+		concurrencyService: NewConcurrencyService(&mockConcurrencyCache{acquireResults: map[int64]bool{
+			stalePrimary.ID: false,
+			staleBackup.ID:  false,
+		}}),
+	}
+
+	result, err := svc.SelectAccountWithLoadAwareness(context.Background(), nil, "", "claude-3-5-sonnet-20241022", nil, "", 0)
+	if err != nil {
+		t.Fatalf("SelectAccountWithLoadAwareness error: %v", err)
+	}
+	if result == nil || result.Account == nil || result.WaitPlan == nil {
+		t.Fatalf("expected wait plan selection")
+	}
+	if result.Account.ID != dbBackup.ID || result.WaitPlan.AccountID != dbBackup.ID {
+		t.Fatalf("expected healthy backup wait plan for account %d, got account=%d wait_plan=%d", dbBackup.ID, result.Account.ID, result.WaitPlan.AccountID)
+	}
+}
+
 func TestGatewaySelectAccountWithLoadAwareness_SkipsAntigravityGeminiFamilyRateLimitedSnapshot(t *testing.T) {
 	resetAt := time.Now().Add(10 * time.Minute).Format(time.RFC3339)
 	cache := &snapshotHydrationCache{

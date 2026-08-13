@@ -291,10 +291,11 @@ type defaultOpenAIAccountScheduler struct {
 }
 
 type openAISelectionProbeBudget struct {
-	acquires  int
-	rechecks  int
-	attempted map[int64]struct{}
-	limited   bool
+	acquires             int
+	rechecks             int
+	candidateInvalidated bool
+	attempted            map[int64]struct{}
+	limited              bool
 }
 
 func newOpenAISelectionProbeBudget() *openAISelectionProbeBudget {
@@ -349,6 +350,12 @@ func (b *openAISelectionProbeBudget) wasAttempted(accountID int64) bool {
 	}
 	_, ok := b.attempted[accountID]
 	return ok
+}
+
+func (b *openAISelectionProbeBudget) recordCandidateInvalidated() {
+	if b != nil {
+		b.candidateInvalidated = true
+	}
 }
 
 type openAIStickyEscapeConfig struct {
@@ -1154,6 +1161,7 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 
 		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, candidate.account, req.Platform, req.RequestedModel, false, req.RequiredCapability)
 		if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
+			budget.recordCandidateInvalidated()
 			release(result)
 			continue
 		}
@@ -1163,11 +1171,13 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 		}
 		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.GroupID, req.Platform, req.RequestedModel, false, req.RequiredCapability)
 		if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
+			budget.recordCandidateInvalidated()
 			release(result)
 			continue
 		}
 		if req.RequireCompact && openAICompactSupportTier(fresh) == 0 {
 			compactBlocked = true
+			budget.recordCandidateInvalidated()
 			release(result)
 			continue
 		}
@@ -1549,6 +1559,46 @@ func (s *defaultOpenAIAccountScheduler) trySelectByLoadBalancePool(
 	if result != nil {
 		attempt.result = result
 		return attempt
+	}
+
+	// A snapshot candidate can pass the initial filter and then be rejected by
+	// the fresh cache/DB checks after slot acquisition. In that case TopK no
+	// longer represents the usable pool, so try its ranked overflow. Do not
+	// expand merely because the selected TopK accounts are busy.
+	if budget.candidateInvalidated && !plan.includeOverflowFallback && plan.topK < len(plan.candidates) {
+		overflowPlan := plan
+		overflowPlan.includeOverflowFallback = true
+		expandedOrder := s.buildOpenAISelectionOrder(req, overflowPlan)
+		primaryIDs := make(map[int64]struct{}, len(attempt.selectionOrder))
+		for _, candidate := range attempt.selectionOrder {
+			if candidate.account != nil {
+				primaryIDs[candidate.account.ID] = struct{}{}
+			}
+		}
+		overflowOrder := make([]openAIAccountCandidateScore, 0, len(expandedOrder)-len(attempt.selectionOrder))
+		for _, candidate := range expandedOrder {
+			if candidate.account == nil {
+				continue
+			}
+			if _, primary := primaryIDs[candidate.account.ID]; primary {
+				continue
+			}
+			overflowOrder = append(overflowOrder, candidate)
+		}
+		if len(overflowOrder) > 0 {
+			budget.enableLimit()
+			overflowResult, overflowCompactBlocked, overflowErr := s.tryAcquireOpenAISelectionOrderWithBudget(ctx, req, overflowOrder, budget)
+			attempt.compactBlocked = attempt.compactBlocked || overflowCompactBlocked
+			attempt.selectionOrder = append(attempt.selectionOrder, overflowOrder...)
+			if overflowErr != nil {
+				attempt.err = overflowErr
+				return attempt
+			}
+			if overflowResult != nil {
+				attempt.result = overflowResult
+			}
+			return attempt
+		}
 	}
 
 	if s.service.concurrencyService != nil && !budget.acquireExhausted() {

@@ -424,7 +424,7 @@ SELECT
   e.upstream_status_code,
   COALESCE(e.upstream_error_message, ''),
   COALESCE(e.upstream_error_detail, ''),
-  COALESCE(e.upstream_errors::text, ''),
+  COALESCE(CAST(e.upstream_errors AS TEXT), ''),
   e.is_business_limited,
   e.user_id,
   COALESCE(u.email, ''),
@@ -1031,8 +1031,9 @@ func buildOpsErrorLogsWhere(filter *service.OpsErrorLogFilter) (string, []any) {
 		clauses = append(clauses, "COALESCE(e.is_count_tokens, false) = false")
 	}
 	if len(filter.ErrorPhasesAny) > 0 {
-		args = append(args, pq.Array(filter.ErrorPhasesAny))
-		clauses = append(clauses, "e.error_phase = ANY($"+itoa(len(args))+")")
+		clause, inArgs := sqlSliceIn("e.error_phase", filter.ErrorPhasesAny, len(args)+1)
+		args = append(args, inArgs...)
+		clauses = append(clauses, clause)
 	}
 	if len(filter.ErrorTypesAny) > 0 {
 		args = append(args, pq.Array(filter.ErrorTypesAny))

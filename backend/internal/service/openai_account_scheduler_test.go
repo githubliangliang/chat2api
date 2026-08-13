@@ -1555,6 +1555,153 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyRateLimite
 	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
 }
 
+// A scheduler snapshot can briefly retain a manually disabled account until its
+// change event is consumed. That stale top-ranked account must not crowd a healthy
+// account out of a small TopK after the database recheck rejects it.
+func TestOpenAIGatewayService_SelectAccountWithScheduler_StaleInvalidTopKFallsBackToHealthyAccount(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*Account)
+	}{
+		{
+			name: "manually unschedulable",
+			mutate: func(account *Account) {
+				account.Schedulable = false
+			},
+		},
+		{
+			name: "manually disabled",
+			mutate: func(account *Account) {
+				account.Status = StatusDisabled
+			},
+		},
+		{
+			name: "local quota exhausted",
+			mutate: func(account *Account) {
+				account.Type = AccountTypeAPIKey
+				account.Extra = map[string]any{"quota_limit": 10.0, "quota_used": 10.0}
+			},
+		},
+	}
+
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+			ctx := context.Background()
+			groupID := int64(101011 + i)
+			stalePrimary := &Account{ID: int64(31011 + i*10), Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, GroupIDs: []int64{groupID}}
+			staleBackup := &Account{ID: stalePrimary.ID + 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 10, GroupIDs: []int64{groupID}}
+			dbPrimary := *stalePrimary
+			tt.mutate(&dbPrimary)
+			dbBackup := *staleBackup
+
+			cfg := &config.Config{RunMode: config.RunModeStandard}
+			cfg.Gateway.OpenAIWS.LBTopK = 1
+			cfg.Gateway.OpenAIWS.SchedulerScoreWeights.Priority = 1
+
+			snapshotCache := &openAISnapshotCacheStub{
+				snapshotAccounts: []*Account{stalePrimary, staleBackup},
+				accountsByID:     map[int64]*Account{stalePrimary.ID: stalePrimary, staleBackup.ID: staleBackup},
+			}
+			svc := &OpenAIGatewayService{
+				accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{dbPrimary, dbBackup}},
+				cache:              &schedulerTestGatewayCache{},
+				cfg:                cfg,
+				rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
+				schedulerSnapshot:  &SchedulerSnapshotService{cache: snapshotCache},
+				concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+			}
+
+			selection, decision, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", "", "gpt-5.6-sol", nil, OpenAIUpstreamTransportAny, false)
+			require.NoError(t, err)
+			require.NotNil(t, selection)
+			require.NotNil(t, selection.Account)
+			require.Equal(t, dbBackup.ID, selection.Account.ID)
+			require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+		})
+	}
+}
+
+func TestOpenAIGatewayService_SelectGrokAccountWithScheduler_StaleDisabledTopKFallsBackToHealthyAccount(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	groupID := int64(101014)
+	stalePrimary := &Account{ID: 31041, Platform: PlatformGrok, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, GroupIDs: []int64{groupID}}
+	staleBackup := &Account{ID: 31042, Platform: PlatformGrok, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 10, GroupIDs: []int64{groupID}}
+	dbPrimary := *stalePrimary
+	dbPrimary.Status = StatusDisabled
+	dbBackup := *staleBackup
+
+	cfg := &config.Config{RunMode: config.RunModeStandard}
+	cfg.Gateway.OpenAIWS.LBTopK = 1
+	cfg.Gateway.OpenAIWS.SchedulerScoreWeights.Priority = 1
+	snapshotCache := &openAISnapshotCacheStub{
+		snapshotAccounts: []*Account{stalePrimary, staleBackup},
+		accountsByID:     map[int64]*Account{stalePrimary.ID: stalePrimary, staleBackup.ID: staleBackup},
+	}
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{dbPrimary, dbBackup}},
+		cache:              &schedulerTestGatewayCache{},
+		cfg:                cfg,
+		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
+		schedulerSnapshot:  &SchedulerSnapshotService{cache: snapshotCache},
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+	}
+
+	selection, decision, err := svc.SelectAccountWithSchedulerForCapability(
+		context.Background(),
+		&groupID,
+		"",
+		"",
+		"grok-4.5",
+		nil,
+		OpenAIUpstreamTransportAny,
+		"",
+		false,
+		false,
+		true,
+		PlatformGrok,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, dbBackup.ID, selection.Account.ID)
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+}
+
+func TestOpenAIGatewayService_SelectAccountWithScheduler_BusyTopKStillWaitsWithoutOverflow(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	groupID := int64(101013)
+	primary := Account{ID: 31031, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, GroupIDs: []int64{groupID}}
+	backup := Account{ID: 31032, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 10, GroupIDs: []int64{groupID}}
+	cfg := &config.Config{RunMode: config.RunModeStandard}
+	cfg.Gateway.OpenAIWS.LBTopK = 1
+	cfg.Gateway.OpenAIWS.SchedulerScoreWeights.Priority = 1
+
+	svc := &OpenAIGatewayService{
+		accountRepo:      schedulerTestOpenAIAccountRepo{accounts: []Account{primary, backup}},
+		cache:            &schedulerTestGatewayCache{},
+		cfg:              cfg,
+		rateLimitService: newOpenAIAdvancedSchedulerRateLimitService("true"),
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{
+			loadMap: map[int64]*AccountLoadInfo{
+				primary.ID: {AccountID: primary.ID, CurrentConcurrency: 1, LoadRate: 100},
+				backup.ID:  {AccountID: backup.ID, CurrentConcurrency: 0, LoadRate: 0},
+			},
+		}),
+	}
+
+	selection, _, err := svc.SelectAccountWithScheduler(context.Background(), &groupID, "", "", "gpt-5.6-sol", nil, OpenAIUpstreamTransportAny, false)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.NotNil(t, selection.WaitPlan)
+	require.Equal(t, primary.ID, selection.Account.ID)
+	require.Equal(t, primary.ID, selection.WaitPlan.AccountID)
+}
+
 func TestOpenAIGatewayService_SelectAccountForModelWithExclusions_AutoPauseBy5hThreshold(t *testing.T) {
 	ctx := context.Background()
 	primary := Account{
