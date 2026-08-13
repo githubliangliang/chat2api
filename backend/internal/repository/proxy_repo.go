@@ -202,7 +202,6 @@ func lockProxyProbeIdentity(ctx context.Context, client *dbent.Client, proxyID i
 		SELECT protocol, host, port, COALESCE(username, ''), COALESCE(password, ''), status
 		FROM proxies
 		WHERE id = $1 AND deleted_at IS NULL
-		FOR NO KEY UPDATE
 	`, proxyID)
 	if err != nil {
 		return proxyProbeIdentity{}, err
@@ -224,18 +223,16 @@ func lockProxyProbeIdentity(ctx context.Context, client *dbent.Client, proxyID i
 func invalidateProxyProbeSnapshots(ctx context.Context, exec sqlExecutor, proxyID int64) ([]int64, error) {
 	rows, err := exec.QueryContext(ctx, `
 		UPDATE accounts
-		SET extra = COALESCE(extra, '{}'::jsonb)
-				- 'upstream_billing_probe'
-				- 'ollama_cloud_usage_snapshot',
-			updated_at = NOW()
+		SET extra = json_remove(COALESCE(extra, '{}'), '$.upstream_billing_probe', '$.ollama_cloud_usage_snapshot'),
+			updated_at = CURRENT_TIMESTAMP
 		WHERE proxy_id = $1
 			AND type = 'apikey'
 			AND (
-				(extra ? 'upstream_billing_probe'
-					AND extra -> 'upstream_billing_probe' <> 'null'::jsonb)
+				(json_type(extra, '$.upstream_billing_probe') IS NOT NULL
+					AND json_type(extra, '$.upstream_billing_probe') <> 'null')
 				OR (platform IN ('openai', 'anthropic')
-					AND extra ? 'ollama_cloud_usage_snapshot'
-					AND extra -> 'ollama_cloud_usage_snapshot' <> 'null'::jsonb)
+					AND json_type(extra, '$.ollama_cloud_usage_snapshot') IS NOT NULL
+					AND json_type(extra, '$.ollama_cloud_usage_snapshot') <> 'null')
 			)
 			AND deleted_at IS NULL
 		RETURNING id
