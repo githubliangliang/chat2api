@@ -149,17 +149,44 @@ func (t *channelMonitorV2Time) Scan(value any) error {
 		t.Time = value
 		return nil
 	case string:
-		parsed, err := time.Parse("2006-01-02 15:04:05", value)
-		if err != nil {
-			return err
+		for _, layout := range []string{
+			time.RFC3339Nano,
+			"2006-01-02 15:04:05.999999999Z07:00",
+			"2006-01-02 15:04:05Z07:00",
+			"2006-01-02 15:04:05.999999999",
+			"2006-01-02 15:04:05",
+		} {
+			if parsed, err := time.Parse(layout, value); err == nil {
+				t.Time = parsed.UTC()
+				return nil
+			}
 		}
-		t.Time = parsed.UTC()
-		return nil
+		return fmt.Errorf("invalid channel monitor v2 time %q", value)
 	case []byte:
 		return t.Scan(string(value))
 	default:
 		return fmt.Errorf("unsupported channel monitor v2 time value %T", value)
 	}
+}
+
+type channelMonitorV2NullTime struct {
+	time.Time
+	Valid bool
+}
+
+func (t *channelMonitorV2NullTime) Scan(value any) error {
+	if value == nil {
+		t.Time = time.Time{}
+		t.Valid = false
+		return nil
+	}
+	var parsed channelMonitorV2Time
+	if err := parsed.Scan(value); err != nil {
+		return err
+	}
+	t.Time = parsed.Time
+	t.Valid = true
+	return nil
 }
 
 func (r *channelMonitorV2Repository) GetDimensions(ctx context.Context, filter service.ChannelMonitorV2Filter, cfg service.ChannelMonitorV2Config) (*service.ChannelMonitorV2Dimensions, error) {
@@ -1029,7 +1056,7 @@ func (r *channelMonitorV2Repository) loadHistograms(ctx context.Context, filter 
 }
 
 func (r *channelMonitorV2Repository) GetAggregationWatermark(ctx context.Context) (*service.ChannelMonitorV2AggregationWatermark, error) {
-	var usageStart, errorStart, dataThrough, computed, backfill sql.NullTime
+	var usageStart, errorStart, dataThrough, computed, backfill channelMonitorV2NullTime
 	err := r.db.QueryRowContext(ctx, `
 		SELECT usage_coverage_start, error_coverage_start, data_through, last_successful_at, backfill_cursor
 		FROM channel_monitor_v2_watermarks WHERE id = 1`).Scan(&usageStart, &errorStart, &dataThrough, &computed, &backfill)

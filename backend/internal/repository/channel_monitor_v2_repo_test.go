@@ -447,6 +447,11 @@ func TestChannelMonitorV2RecomputeRangeRunsOnSQLite(t *testing.T) {
 		SELECT unixepoch(data_through), unixepoch($1) FROM channel_monitor_v2_watermarks WHERE id = 1
 	`, end).Scan(&dataThroughEpoch, &wantEpoch))
 	require.Equal(t, wantEpoch, dataThroughEpoch)
+
+	watermark, err := repo.GetAggregationWatermark(ctx)
+	require.NoError(t, err)
+	require.True(t, watermark.HasData)
+	require.Equal(t, wantEpoch, watermark.DataThrough.Unix())
 }
 
 func TestChannelMonitorV2LoadErrorDetailsRunsOnSQLite(t *testing.T) {
