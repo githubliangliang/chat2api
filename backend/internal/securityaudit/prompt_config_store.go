@@ -255,12 +255,9 @@ func (m *ConfigManager) Save(ctx context.Context, req UpdateConfigRequest, actor
 		return PublicConfig{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, promptAuditConfigLockKey); err != nil {
-		return PublicConfig{}, err
-	}
 	current := DefaultStorageConfig()
 	var raw string
-	err = tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=$1 FOR UPDATE`, SettingKeyPromptAuditConfig).Scan(&raw)
+	err = tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=$1`, SettingKeyPromptAuditConfig).Scan(&raw)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return PublicConfig{}, err
 	}

@@ -141,21 +141,30 @@ func (r *PostgreSQLRepository) MarkStagingFailed(ctx context.Context, jobID int6
 }
 
 func (r *PostgreSQLRepository) ClaimNextJob(ctx context.Context, now time.Time) (*Job, bool, error) {
-	row := r.db.QueryRowContext(ctx, `
-		WITH candidate AS (
-			SELECT id FROM prompt_audit_jobs
-			WHERE status IN ('queued','retry') AND next_attempt_at <= $1
-			ORDER BY next_attempt_at, id
-			FOR UPDATE SKIP LOCKED
-			LIMIT 1
-		)
-		UPDATE prompt_audit_jobs AS j
-		SET status='processing', attempts=j.attempts+1, claim_version=j.claim_version+1,
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var candidateID int64
+	err = tx.QueryRowContext(ctx, `SELECT id FROM prompt_audit_jobs
+		WHERE status IN ('queued','retry') AND next_attempt_at <= $1
+		ORDER BY next_attempt_at, id LIMIT 1`, now.UTC()).Scan(&candidateID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	row := tx.QueryRowContext(ctx, `UPDATE prompt_audit_jobs
+		SET status='processing', attempts=attempts+1, claim_version=claim_version+1,
 			processing_started_at=$1, updated_at=$1
-		FROM candidate
-		WHERE j.id=candidate.id
-		RETURNING `+jobColumns("j"), now.UTC())
+		WHERE id=$2 AND status IN ('queued','retry')
+		RETURNING `+jobColumns("prompt_audit_jobs"), now.UTC(), candidateID)
 	job, err := scanJob(row)
+	if err == nil {
+		err = tx.Commit()
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, false, nil
 	}
@@ -223,23 +232,20 @@ func (r *PostgreSQLRepository) ReclaimStale(ctx context.Context, stagingBefore, 
 		limit = 100
 	}
 	result, err := r.db.ExecContext(ctx, `
-		WITH stale AS (
-			SELECT id FROM prompt_audit_jobs
+		UPDATE prompt_audit_jobs
+		SET status=CASE
+			WHEN status='staging' THEN 'failed'
+			WHEN attempts < max_attempts THEN 'retry'
+			ELSE 'failed' END,
+			next_attempt_at=CASE WHEN status='processing' AND attempts < max_attempts THEN CURRENT_TIMESTAMP ELSE next_attempt_at END,
+			processing_started_at=NULL,
+			processed_at=CASE WHEN status='staging' OR attempts >= max_attempts THEN CURRENT_TIMESTAMP ELSE NULL END,
+			last_error_code=CASE WHEN status='staging' THEN 'staging_timeout' ELSE 'processing_lease_expired' END,
+			last_error_message='', updated_at=CURRENT_TIMESTAMP
+		WHERE id IN (SELECT id FROM prompt_audit_jobs
 			WHERE (status='staging' AND updated_at < $1)
 			   OR (status='processing' AND processing_started_at < $2)
-			ORDER BY updated_at, id FOR UPDATE SKIP LOCKED LIMIT $3
-		)
-		UPDATE prompt_audit_jobs AS j
-		SET status=CASE
-			WHEN j.status='staging' THEN 'failed'
-			WHEN j.attempts < j.max_attempts THEN 'retry'
-			ELSE 'failed' END,
-			next_attempt_at=CASE WHEN j.status='processing' AND j.attempts < j.max_attempts THEN NOW() ELSE j.next_attempt_at END,
-			processing_started_at=NULL,
-			processed_at=CASE WHEN j.status='staging' OR j.attempts >= j.max_attempts THEN NOW() ELSE NULL END,
-			last_error_code=CASE WHEN j.status='staging' THEN 'staging_timeout' ELSE 'processing_lease_expired' END,
-			last_error_message='', updated_at=NOW()
-		FROM stale WHERE j.id=stale.id`, stagingBefore.UTC(), processingBefore.UTC(), limit)
+			ORDER BY updated_at, id LIMIT $3)`, stagingBefore.UTC(), processingBefore.UTC(), limit)
 	if err != nil {
 		return 0, err
 	}
@@ -351,7 +357,7 @@ func insertEvent(ctx context.Context, queryer sqlQueryer, jobID int64, snapshot 
 			scanner_backend,scanner_version,guard_endpoint_id,policy_id,policy_version,config_version,chunk_total,latency_ms,
 			full_prompt
 		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,
-			$20::jsonb,$21::jsonb,$22::jsonb,$23::jsonb,$24,$25,$26,$27,$28,$29,$30,$31,$32)
+			$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32)
 		RETURNING `+eventDetailColumns("prompt_audit_events"),
 		jobID, snapshot.RequestID, nullableID(snapshot.UserID), snapshot.UsernameSnapshot, snapshot.UserEmailSnapshot,
 		nullableID(snapshot.APIKeyID), snapshot.APIKeyNameSnapshot, snapshot.GroupID, snapshot.GroupName,
