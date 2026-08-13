@@ -13,7 +13,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	"github.com/Wei-Shaw/sub2api/internal/service"
-	"github.com/lib/pq"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -343,6 +342,7 @@ func (r *usageLogRepository) GetAccountWindowStatsBatch(ctx context.Context, acc
 		return result, nil
 	}
 
+	idClause, idArgs := sqlInt64In("account_id", accountIDs, 1)
 	query := `
 		SELECT
 			account_id,
@@ -352,10 +352,10 @@ func (r *usageLogRepository) GetAccountWindowStatsBatch(ctx context.Context, acc
 			COALESCE(SUM(total_cost), 0) as standard_cost,
 			COALESCE(SUM(actual_cost), 0) as user_cost
 		FROM usage_logs
-		WHERE account_id = ANY($1) AND created_at >= $2
+		WHERE ` + idClause + ` AND created_at >= $2
 		GROUP BY account_id
 	`
-	rows, err := r.sql.QueryContext(ctx, query, pq.Array(accountIDs), startTime)
+	rows, err := r.sql.QueryContext(ctx, query, append(idArgs, any(startTime))...)
 	if err != nil {
 		return nil, err
 	}
@@ -396,6 +396,7 @@ func (r *usageLogRepository) GetGeminiUsageTotalsBatch(ctx context.Context, acco
 		return result, nil
 	}
 
+	idClause, idArgs := sqlInt64In("account_id", accountIDs, 1)
 	query := `
 		SELECT
 			account_id,
@@ -406,10 +407,10 @@ func (r *usageLogRepository) GetGeminiUsageTotalsBatch(ctx context.Context, acco
 			COALESCE(SUM(CASE WHEN LOWER(COALESCE(model, '')) LIKE '%flash%' OR LOWER(COALESCE(model, '')) LIKE '%lite%' THEN actual_cost ELSE 0 END), 0) AS flash_cost,
 			COALESCE(SUM(CASE WHEN LOWER(COALESCE(model, '')) LIKE '%flash%' OR LOWER(COALESCE(model, '')) LIKE '%lite%' THEN 0 ELSE actual_cost END), 0) AS pro_cost
 		FROM usage_logs
-		WHERE account_id = ANY($1) AND created_at >= $2 AND created_at < $3
+		WHERE ` + idClause + ` AND created_at >= $2 AND created_at < $3
 		GROUP BY account_id
 	`
-	rows, err := r.sql.QueryContext(ctx, query, pq.Array(accountIDs), startTime, endTime)
+	rows, err := r.sql.QueryContext(ctx, query, append(idArgs, startTime, endTime)...)
 	if err != nil {
 		return nil, err
 	}
@@ -494,6 +495,7 @@ func (r *usageLogRepository) GetBatchUserUsageStats(ctx context.Context, userIDs
 
 	// GROUP BY (user_id, effective_platform) 一次查询同时得到总值与按平台拆分。
 	// 应用层把同一 user_id 的多行累加为总值，并把非空 platform 行收集到 ByPlatform。
+	idClause, idArgs := sqlInt64In("ul.user_id", normalizedUserIDs, 1)
 	query := `
 		SELECT
 			ul.user_id,
@@ -503,13 +505,13 @@ func (r *usageLogRepository) GetBatchUserUsageStats(ctx context.Context, userIDs
 		FROM usage_logs ul
 		LEFT JOIN groups g ON g.id = ul.group_id
 		LEFT JOIN accounts a ON a.id = ul.account_id
-		WHERE ul.user_id = ANY($1)
+		WHERE ` + idClause + `
 		  AND ul.created_at >= LEAST($2, $4)
 		  AND ` + usageLogSuccessFilterUL + `
 		GROUP BY ul.user_id, ` + usageLogEffectivePlatformExpr + `
 	`
 	today := timezone.Today()
-	rows, err := r.sql.QueryContext(ctx, query, pq.Array(normalizedUserIDs), startTime, endTime, today)
+	rows, err := r.sql.QueryContext(ctx, query, append(idArgs, startTime, endTime, today)...)
 	if err != nil {
 		return nil, err
 	}
@@ -570,18 +572,19 @@ func (r *usageLogRepository) GetBatchAPIKeyUsageStats(ctx context.Context, apiKe
 		result[id] = &BatchAPIKeyUsageStats{APIKeyID: id}
 	}
 
+	idClause, idArgs := sqlInt64In("api_key_id", normalizedAPIKeyIDs, 1)
 	query := `
 		SELECT
 			api_key_id,
 			COALESCE(SUM(actual_cost) FILTER (WHERE created_at >= $2 AND created_at < $3), 0) as total_cost,
 			COALESCE(SUM(actual_cost) FILTER (WHERE created_at >= $4), 0) as today_cost
 		FROM usage_logs
-		WHERE api_key_id = ANY($1)
+		WHERE ` + idClause + `
 		  AND created_at >= LEAST($2, $4)
 		GROUP BY api_key_id
 	`
 	today := timezone.Today()
-	rows, err := r.sql.QueryContext(ctx, query, pq.Array(normalizedAPIKeyIDs), startTime, endTime, today)
+	rows, err := r.sql.QueryContext(ctx, query, append(idArgs, startTime, endTime, today)...)
 	if err != nil {
 		return nil, err
 	}
