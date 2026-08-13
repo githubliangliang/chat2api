@@ -65,3 +65,17 @@ func TestBuildUsageLogBatchInsertQuery_UsesConflictDoNothing(t *testing.T) {
 	require.Contains(t, query, "ON CONFLICT (request_id, api_key_id) DO NOTHING")
 	require.NotContains(t, strings.ToUpper(query), "DO UPDATE")
 }
+
+func TestBuildUsageLogBestEffortInsertQueryDisambiguatesSQLiteConflict(t *testing.T) {
+	log := &service.UsageLog{
+		UserID:    1,
+		APIKeyID:  2,
+		RequestID: "req-best-effort-sqlite",
+		Model:     "gpt-5",
+		CreatedAt: time.Now().UTC(),
+	}
+	prepared := prepareUsageLogInsert(log)
+
+	query, _ := buildUsageLogBestEffortInsertQuery([]usageLogInsertPrepared{prepared})
+	require.Contains(t, query, "FROM input\n\t\tWHERE 1 = 1\n\t\tON CONFLICT (request_id, api_key_id) DO NOTHING")
+}

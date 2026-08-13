@@ -1141,6 +1141,7 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			session_id,
 			created_at
 		FROM input
+		WHERE 1 = 1
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 	`)
 
