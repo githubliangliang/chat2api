@@ -1,12 +1,16 @@
 package repository
 
 import (
+	"context"
+	"database/sql"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
+	_ "modernc.org/sqlite"
 )
 
 func TestChannelMonitorV2DisplayModelIsPlatformScoped(t *testing.T) {
@@ -74,9 +78,9 @@ func TestChannelMonitorV2WhereUsesConfiguredScopeAndEmptyFilterMeansAllConfigure
 		GroupIDs:  []int64{3, 4},
 	}
 	where, args := channelMonitorV2Where(filter, cfg, "m")
-	require.Contains(t, where, "m.platform = ANY($3)")
-	require.Contains(t, where, "m.group_id = ANY($4)")
-	require.Len(t, args, 4)
+	require.Contains(t, where, "m.platform IN ($3)")
+	require.Contains(t, where, "m.group_id IN ($4,$5)")
+	require.Equal(t, []any{filter.Start, filter.End, "openai", int64(3), int64(4)}, args)
 }
 
 func TestChannelMonitorV2WhereRejectsGroupFilterOutsideConfiguredScope(t *testing.T) {
@@ -89,7 +93,7 @@ func TestChannelMonitorV2WhereRejectsGroupFilterOutsideConfiguredScope(t *testin
 	}
 	where, args := channelMonitorV2Where(filter, cfg, "m")
 	require.Contains(t, where, "FALSE")
-	require.NotContains(t, where, "m.group_id = ANY")
+	require.NotContains(t, where, "m.group_id IN")
 	require.Len(t, args, 3)
 }
 
@@ -275,9 +279,9 @@ func TestChannelMonitorV2CatalogFilterClearsMultiSelectDimensions(t *testing.T) 
 	_, metricArgs := channelMonitorV2Where(filter, cfg, "m")
 
 	// Catalog WHERE still applies config scope (enabled platforms + group allow-list).
-	require.Contains(t, catalogWhere, "m.platform = ANY")
-	require.Contains(t, catalogWhere, "m.group_id = ANY")
-	require.Len(t, catalogArgs, 4) // start, end, platforms, groups
+	require.Contains(t, catalogWhere, "m.platform IN")
+	require.Contains(t, catalogWhere, "m.group_id IN")
+	require.Len(t, catalogArgs, 6) // start, end, two platforms, two groups
 	require.Len(t, metricArgs, 4)
 
 	// Metrics WHERE is narrower once multi-select platforms/groups are applied.
@@ -285,4 +289,105 @@ func TestChannelMonitorV2CatalogFilterClearsMultiSelectDimensions(t *testing.T) 
 	// Group seeding without multi-select uses full config allow-list.
 	require.Equal(t, []int64{3, 4}, configuredChannelMonitorV2GroupIDs(catalog, cfg))
 	require.Equal(t, []int64{3}, configuredChannelMonitorV2GroupIDs(filter, cfg))
+}
+
+func TestChannelMonitorV2ConfigRoundTripsSQLiteJSON(t *testing.T) {
+	db := openChannelMonitorV2SQLite(t)
+	_, err := db.Exec(`CREATE TABLE channel_monitor_v2_config (
+		id INTEGER PRIMARY KEY, version INTEGER NOT NULL, enabled BOOLEAN NOT NULL,
+		refresh_interval_seconds INTEGER NOT NULL, platforms TEXT NOT NULL,
+		group_ids TEXT NOT NULL, ignored_error_categories TEXT NOT NULL,
+		health_thresholds TEXT NOT NULL, updated_at DATETIME NOT NULL, updated_by INTEGER
+	)`)
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO channel_monitor_v2_config VALUES
+		(1, 1, 1, 60, '[]', '[]', '[]', '{}', datetime('now'), NULL)`)
+	require.NoError(t, err)
+
+	repo := &channelMonitorV2Repository{db: db}
+	updatedBy := int64(42)
+	want := service.ChannelMonitorV2Config{
+		Enabled: true, RefreshIntervalSeconds: 300,
+		Platforms: []service.ChannelMonitorV2PlatformConfig{{Platform: "openai", Enabled: true, Models: []string{"gpt-5"}}},
+		GroupIDs:  []int64{7, 9}, IgnoredErrorCategories: []string{"timeout"}, UpdatedBy: &updatedBy,
+	}
+	updated, err := repo.UpdateConfig(context.Background(), want, 1)
+	require.NoError(t, err)
+	require.Equal(t, 2, updated.Version)
+	require.Equal(t, want.Platforms, updated.Platforms)
+	require.Equal(t, want.GroupIDs, updated.GroupIDs)
+	require.Equal(t, want.IgnoredErrorCategories, updated.IgnoredErrorCategories)
+
+	loaded, err := repo.GetConfig(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, updated.Version, loaded.Version)
+	require.Equal(t, want.Platforms, loaded.Platforms)
+	require.Equal(t, want.GroupIDs, loaded.GroupIDs)
+	require.Equal(t, want.IgnoredErrorCategories, loaded.IgnoredErrorCategories)
+
+	_, err = repo.UpdateConfig(context.Background(), want, 1)
+	require.ErrorIs(t, err, service.ErrChannelMonitorV2ConfigConflict)
+}
+
+func TestChannelMonitorV2LoadFactsBucketsOnSQLite(t *testing.T) {
+	db := openChannelMonitorV2SQLite(t)
+	_, err := db.Exec(`CREATE TABLE groups (id INTEGER PRIMARY KEY, name TEXT, platform TEXT, deleted_at DATETIME, status TEXT)`)
+	require.NoError(t, err)
+	_, err = db.Exec(`CREATE TABLE channel_monitor_v2_metrics_1m (
+		bucket_start DATETIME NOT NULL, platform TEXT NOT NULL, group_id INTEGER NOT NULL, model TEXT NOT NULL,
+		success_requests INTEGER NOT NULL, error_requests INTEGER NOT NULL,
+		upstream_affected_requests INTEGER NOT NULL, upstream_attempt_count INTEGER NOT NULL,
+		input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL,
+		cache_creation_tokens INTEGER NOT NULL, cache_read_tokens INTEGER NOT NULL,
+		ttft_sum_ms INTEGER NOT NULL, ttft_count INTEGER NOT NULL,
+		duration_sum_ms INTEGER NOT NULL, duration_count INTEGER NOT NULL)`)
+	require.NoError(t, err)
+	start := time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC)
+	for _, offset := range []time.Duration{10 * time.Second, 50 * time.Second} {
+		_, err = db.Exec(`INSERT INTO channel_monitor_v2_metrics_1m VALUES ($1,'openai',0,'gpt-5',1,0,0,0,1,2,0,0,10,1,20,1)`, start.Add(offset))
+		require.NoError(t, err)
+	}
+	repo := &channelMonitorV2Repository{db: db}
+	cfg := service.ChannelMonitorV2Config{Platforms: []service.ChannelMonitorV2PlatformConfig{{Platform: "openai", Enabled: true}}}
+	facts, err := repo.loadFacts(context.Background(), service.ChannelMonitorV2Filter{
+		Start: start, End: start.Add(10 * time.Minute), Bucket: 2 * time.Minute,
+	}, cfg, true)
+	require.NoError(t, err)
+	require.Len(t, facts, 1)
+	require.Equal(t, int64(2), facts[0].Success)
+	require.Equal(t, start.Format(time.RFC3339Nano), facts[0].BucketStart)
+}
+
+func TestChannelMonitorV2LoadErrorDetailsRunsOnSQLite(t *testing.T) {
+	db := openChannelMonitorV2SQLite(t)
+	_, err := db.Exec(`CREATE TABLE ops_error_logs (
+		id INTEGER PRIMARY KEY, request_id TEXT, created_at DATETIME NOT NULL,
+		is_count_tokens BOOLEAN NOT NULL, status_code INTEGER, error_type TEXT,
+		platform TEXT, group_id INTEGER, requested_model TEXT, model TEXT,
+		error_owner TEXT, error_source TEXT, upstream_status_code INTEGER,
+		upstream_error_message TEXT, error_message TEXT, upstream_error_detail TEXT,
+		error_body TEXT)`)
+	require.NoError(t, err)
+	start := time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC)
+	_, err = db.Exec(`INSERT INTO ops_error_logs VALUES
+		(1,'req-1',$1,0,504,'timeout','openai',0,'gpt-5','gpt-5','provider','upstream',504,
+		 'gateway timeout','','','')`, start.Add(time.Minute))
+	require.NoError(t, err)
+
+	repo := &channelMonitorV2Repository{db: db}
+	cfg := service.ChannelMonitorV2Config{Platforms: []service.ChannelMonitorV2PlatformConfig{{Platform: "openai", Enabled: true}}}
+	details, err := repo.loadErrorDetails(context.Background(), service.ChannelMonitorV2Filter{
+		Start: start, End: start.Add(time.Hour),
+	}, cfg)
+	require.NoError(t, err)
+	require.Len(t, details["timeout"], 1)
+	require.Equal(t, "gateway timeout", details["timeout"][0].Message)
+}
+
+func openChannelMonitorV2SQLite(t *testing.T) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("sqlite", fmt.Sprintf("file:%s?mode=memory&cache=shared&_time_format=sqlite", t.Name()))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+	return db
 }

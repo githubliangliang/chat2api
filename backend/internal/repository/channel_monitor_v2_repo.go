@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
-	"github.com/lib/pq"
 )
 
 type channelMonitorV2Repository struct{ db *sql.DB }
@@ -21,15 +20,15 @@ func NewChannelMonitorV2Repository(db *sql.DB) service.ChannelMonitorV2Repositor
 
 func (r *channelMonitorV2Repository) GetConfig(ctx context.Context) (*service.ChannelMonitorV2Config, error) {
 	var cfg service.ChannelMonitorV2Config
-	var platforms, thresholds []byte
+	var platforms, groupIDs, ignoredCategories, thresholds []byte
 	err := r.db.QueryRowContext(ctx, `
 		SELECT version, enabled, refresh_interval_seconds, platforms, group_ids,
-		       COALESCE(ignored_error_categories, '{}'),
-		       COALESCE(health_thresholds, '{}'::jsonb),
+		       COALESCE(ignored_error_categories, '[]'),
+		       COALESCE(health_thresholds, '{}'),
 		       updated_at, updated_by
 		FROM channel_monitor_v2_config WHERE id = 1`).Scan(
 		&cfg.Version, &cfg.Enabled, &cfg.RefreshIntervalSeconds, &platforms,
-		pq.Array(&cfg.GroupIDs), pq.Array(&cfg.IgnoredErrorCategories),
+		&groupIDs, &ignoredCategories,
 		&thresholds,
 		&cfg.UpdatedAt, &cfg.UpdatedBy,
 	)
@@ -39,8 +38,11 @@ func (r *channelMonitorV2Repository) GetConfig(ctx context.Context) (*service.Ch
 	if err := json.Unmarshal(platforms, &cfg.Platforms); err != nil {
 		return nil, fmt.Errorf("decode channel monitor v2 platforms: %w", err)
 	}
-	if cfg.IgnoredErrorCategories == nil {
-		cfg.IgnoredErrorCategories = []string{}
+	if err := unmarshalChannelMonitorV2Slice(groupIDs, &cfg.GroupIDs); err != nil {
+		return nil, fmt.Errorf("decode channel monitor v2 group ids: %w", err)
+	}
+	if err := unmarshalChannelMonitorV2Slice(ignoredCategories, &cfg.IgnoredErrorCategories); err != nil {
+		return nil, fmt.Errorf("decode channel monitor v2 ignored error categories: %w", err)
 	}
 	cfg.HealthThresholds = service.DefaultChannelMonitorV2HealthThresholds()
 	if len(thresholds) > 0 {
@@ -58,27 +60,35 @@ func (r *channelMonitorV2Repository) UpdateConfig(ctx context.Context, cfg servi
 	if cfg.IgnoredErrorCategories == nil {
 		cfg.IgnoredErrorCategories = []string{}
 	}
+	groupIDs, err := json.Marshal(cfg.GroupIDs)
+	if err != nil {
+		return nil, err
+	}
+	ignoredCategories, err := json.Marshal(cfg.IgnoredErrorCategories)
+	if err != nil {
+		return nil, err
+	}
 	cfg.HealthThresholds = service.NormalizeChannelMonitorV2HealthThresholds(cfg.HealthThresholds)
 	thresholds, err := json.Marshal(cfg.HealthThresholds)
 	if err != nil {
 		return nil, err
 	}
 	var updated service.ChannelMonitorV2Config
-	var raw, rawThresholds []byte
+	var raw, rawGroupIDs, rawIgnoredCategories, rawThresholds []byte
 	err = r.db.QueryRowContext(ctx, `
 		UPDATE channel_monitor_v2_config
 		SET version = version + 1, enabled = $1, refresh_interval_seconds = $2,
 		    platforms = $3, group_ids = $4, ignored_error_categories = $5,
-		    health_thresholds = $6, updated_by = $7, updated_at = NOW()
+		    health_thresholds = $6, updated_by = $7, updated_at = datetime('now')
 		WHERE id = 1 AND version = $8
 		RETURNING version, enabled, refresh_interval_seconds, platforms, group_ids,
-		          COALESCE(ignored_error_categories, '{}'),
-		          COALESCE(health_thresholds, '{}'::jsonb),
+		          COALESCE(ignored_error_categories, '[]'),
+		          COALESCE(health_thresholds, '{}'),
 		          updated_at, updated_by`,
-		cfg.Enabled, cfg.RefreshIntervalSeconds, platforms, pq.Array(cfg.GroupIDs),
-		pq.Array(cfg.IgnoredErrorCategories), thresholds, cfg.UpdatedBy, expectedVersion,
+		cfg.Enabled, cfg.RefreshIntervalSeconds, platforms, groupIDs,
+		ignoredCategories, thresholds, cfg.UpdatedBy, expectedVersion,
 	).Scan(&updated.Version, &updated.Enabled, &updated.RefreshIntervalSeconds, &raw,
-		pq.Array(&updated.GroupIDs), pq.Array(&updated.IgnoredErrorCategories),
+		&rawGroupIDs, &rawIgnoredCategories,
 		&rawThresholds,
 		&updated.UpdatedAt, &updated.UpdatedBy)
 	if err == sql.ErrNoRows {
@@ -90,13 +100,30 @@ func (r *channelMonitorV2Repository) UpdateConfig(ctx context.Context, cfg servi
 	if err := json.Unmarshal(raw, &updated.Platforms); err != nil {
 		return nil, err
 	}
-	if updated.IgnoredErrorCategories == nil {
-		updated.IgnoredErrorCategories = []string{}
+	if err := unmarshalChannelMonitorV2Slice(rawGroupIDs, &updated.GroupIDs); err != nil {
+		return nil, err
+	}
+	if err := unmarshalChannelMonitorV2Slice(rawIgnoredCategories, &updated.IgnoredErrorCategories); err != nil {
+		return nil, err
 	}
 	updated.HealthThresholds = service.DefaultChannelMonitorV2HealthThresholds()
 	_ = json.Unmarshal(rawThresholds, &updated.HealthThresholds)
 	updated.HealthThresholds = service.NormalizeChannelMonitorV2HealthThresholds(updated.HealthThresholds)
 	return &updated, nil
+}
+
+func unmarshalChannelMonitorV2Slice[T any](raw []byte, dst *[]T) error {
+	if strings.TrimSpace(string(raw)) == "{}" {
+		*dst = []T{}
+		return nil
+	}
+	if err := json.Unmarshal(raw, dst); err != nil {
+		return err
+	}
+	if *dst == nil {
+		*dst = []T{}
+	}
+	return nil
 }
 
 type channelMonitorV2Fact struct {
@@ -112,6 +139,27 @@ type channelMonitorV2Histogram struct {
 	GroupID, UserID                      int64
 	UpperBound                           int64
 	Count                                int64
+}
+
+type channelMonitorV2Time struct{ time.Time }
+
+func (t *channelMonitorV2Time) Scan(value any) error {
+	switch value := value.(type) {
+	case time.Time:
+		t.Time = value
+		return nil
+	case string:
+		parsed, err := time.Parse("2006-01-02 15:04:05", value)
+		if err != nil {
+			return err
+		}
+		t.Time = parsed.UTC()
+		return nil
+	case []byte:
+		return t.Scan(string(value))
+	default:
+		return fmt.Errorf("unsupported channel monitor v2 time value %T", value)
+	}
 }
 
 func (r *channelMonitorV2Repository) GetDimensions(ctx context.Context, filter service.ChannelMonitorV2Filter, cfg service.ChannelMonitorV2Config) (*service.ChannelMonitorV2Dimensions, error) {
@@ -619,7 +667,8 @@ func (r *channelMonitorV2Repository) loadChannelMonitorV2GroupInfo(ctx context.C
 	if len(groupIDs) == 0 {
 		return out, nil
 	}
-	rows, err := r.db.QueryContext(ctx, `SELECT id, COALESCE(name, ''), lower(COALESCE(NULLIF(TRIM(platform), ''), 'unknown')) FROM groups WHERE id = ANY($1) AND deleted_at IS NULL AND status = 'active'`, pq.Array(groupIDs))
+	inClause, args := sqlInt64In("id", groupIDs, 1)
+	rows, err := r.db.QueryContext(ctx, `SELECT id, COALESCE(name, ''), lower(COALESCE(NULLIF(TRIM(platform), ''), 'unknown')) FROM groups WHERE `+inClause+` AND deleted_at IS NULL AND status = 'active'`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -718,8 +767,9 @@ func (r *channelMonitorV2Repository) loadErrorDetails(ctx context.Context, filte
 		platforms = intersectStrings(platforms, filter.Platforms)
 	}
 	if len(platforms) > 0 {
-		args = append(args, pq.Array(platforms))
-		conditions = append(conditions, fmt.Sprintf("lower(COALESCE(NULLIF(TRIM(current_error.platform), ''), 'unknown')) = ANY($%d)", len(args)))
+		condition, values := sqlSliceIn("lower(COALESCE(NULLIF(TRIM(current_error.platform), ''), 'unknown'))", platforms, len(args)+1)
+		conditions = append(conditions, condition)
+		args = append(args, values...)
 	} else {
 		conditions = append(conditions, "FALSE")
 	}
@@ -736,8 +786,9 @@ func (r *channelMonitorV2Repository) loadErrorDetails(ctx context.Context, filte
 	if groupScopeEmpty {
 		conditions = append(conditions, "FALSE")
 	} else if len(groups) > 0 {
-		args = append(args, pq.Array(groups))
-		conditions = append(conditions, fmt.Sprintf("COALESCE(current_error.group_id, 0) = ANY($%d)", len(args)))
+		condition, values := sqlInt64In("COALESCE(current_error.group_id, 0)", groups, len(args)+1)
+		conditions = append(conditions, condition)
+		args = append(args, values...)
 	}
 	query := `SELECT
 			lower(COALESCE(NULLIF(TRIM(current_error.platform), ''), 'unknown')) AS platform,
@@ -748,7 +799,7 @@ func (r *channelMonitorV2Repository) loadErrorDetails(ctx context.Context, filte
 			COALESCE(current_error.error_source, '') AS error_source,
 			COALESCE(current_error.status_code, 0) AS status_code,
 			COALESCE(current_error.upstream_status_code, 0) AS upstream_status_code,
-			LEFT(COALESCE(NULLIF(current_error.upstream_error_message, ''), NULLIF(current_error.error_message, ''), NULLIF(current_error.upstream_error_detail, ''), NULLIF(current_error.error_body, ''), current_error.error_type, ''), 600) AS message,
+			substr(COALESCE(NULLIF(current_error.upstream_error_message, ''), NULLIF(current_error.error_message, ''), NULLIF(current_error.upstream_error_detail, ''), NULLIF(current_error.error_body, ''), current_error.error_type, ''), 1, 600) AS message,
 			COUNT(*) AS count
 		FROM ops_error_logs current_error
 		WHERE ` + strings.Join(conditions, " AND ") + `
@@ -911,9 +962,9 @@ func (r *channelMonitorV2Repository) loadFacts(ctx context.Context, filter servi
 			bucketExpr = "m.bucket_start"
 			group = bucketExpr + "," + group
 		} else {
-			args = append([]any{fmt.Sprintf("%d seconds", int(filter.Bucket.Seconds()))}, args...)
+			args = append([]any{int(filter.Bucket.Seconds())}, args...)
 			where = shiftSQLPlaceholders(where, 1)
-			bucketExpr = "date_bin($1::interval,m.bucket_start,TIMESTAMPTZ '1970-01-01')"
+			bucketExpr = channelMonitorV2SQLiteBucketExpr("m.bucket_start", 1)
 			group = bucketExpr + "," + group
 		}
 	}
@@ -925,7 +976,7 @@ func (r *channelMonitorV2Repository) loadFacts(ctx context.Context, filter servi
 	defer func() { _ = rows.Close() }()
 	facts := []channelMonitorV2Fact{}
 	for rows.Next() {
-		var bucket time.Time
+		var bucket channelMonitorV2Time
 		var f channelMonitorV2Fact
 		if err := rows.Scan(&bucket, &f.Platform, &f.GroupID, &f.GroupName, &f.Model, &f.Success, &f.Errors, &f.UpstreamAffected, &f.UpstreamAttempts, &f.Input, &f.Output, &f.CacheCreation, &f.CacheRead, &f.TTFTSum, &f.TTFTCount, &f.DurationSum, &f.DurationCount); err != nil {
 			return nil, err
@@ -952,10 +1003,10 @@ func (r *channelMonitorV2Repository) loadHistograms(ctx context.Context, filter 
 			group = bucketExpr + "," + group
 		} else {
 			oldArgs := args
-			args = []any{fmt.Sprintf("%d seconds", int(filter.Bucket.Seconds()))}
+			args = []any{int(filter.Bucket.Seconds())}
 			args = append(args, oldArgs...)
 			where = shiftSQLPlaceholders(where, 1)
-			bucketExpr = "date_bin($1::interval,h.bucket_start,TIMESTAMPTZ '1970-01-01')"
+			bucketExpr = channelMonitorV2SQLiteBucketExpr("h.bucket_start", 1)
 			group = bucketExpr + "," + group
 		}
 	}
@@ -966,7 +1017,7 @@ func (r *channelMonitorV2Repository) loadHistograms(ctx context.Context, filter 
 	defer func() { _ = rows.Close() }()
 	out := []channelMonitorV2Histogram{}
 	for rows.Next() {
-		var bucket time.Time
+		var bucket channelMonitorV2Time
 		var h channelMonitorV2Histogram
 		if err := rows.Scan(&bucket, &h.Platform, &h.GroupID, &h.Model, &h.UserID, &h.Metric, &h.UpperBound, &h.Count); err != nil {
 			return nil, err
@@ -1131,8 +1182,9 @@ func channelMonitorV2Where(filter service.ChannelMonitorV2Filter, cfg service.Ch
 		platforms = intersectStrings(platforms, filter.Platforms)
 	}
 	if len(platforms) > 0 {
-		args = append(args, pq.Array(platforms))
-		conditions = append(conditions, fmt.Sprintf("%s.platform = ANY($%d)", alias, len(args)))
+		condition, values := sqlSliceIn(alias+".platform", platforms, len(args)+1)
+		conditions = append(conditions, condition)
+		args = append(args, values...)
 	} else {
 		conditions = append(conditions, "FALSE")
 	}
@@ -1149,10 +1201,15 @@ func channelMonitorV2Where(filter service.ChannelMonitorV2Filter, cfg service.Ch
 	if groupScopeEmpty {
 		conditions = append(conditions, "FALSE")
 	} else if len(groups) > 0 {
-		args = append(args, pq.Array(groups))
-		conditions = append(conditions, fmt.Sprintf("%s.group_id = ANY($%d)", alias, len(args)))
+		condition, values := sqlInt64In(alias+".group_id", groups, len(args)+1)
+		conditions = append(conditions, condition)
+		args = append(args, values...)
 	}
 	return "WHERE " + strings.Join(conditions, " AND "), args
+}
+
+func channelMonitorV2SQLiteBucketExpr(column string, secondsArg int) string {
+	return fmt.Sprintf("datetime((CAST(strftime('%%s', %s) AS INTEGER) / $%d) * $%d, 'unixepoch')", column, secondsArg, secondsArg)
 }
 
 func channelMonitorV2EnabledPlatforms(cfg service.ChannelMonitorV2Config) []string {
@@ -1401,7 +1458,7 @@ func applyIgnoredErrors(m *service.ChannelMonitorV2Metric, ignoredCount int64) {
 
 // loadIgnoredErrorCounts returns per-bucket and total ignored error request counts
 // for categories listed in cfg.IgnoredErrorCategories. Buckets use the same
-// date_bin alignment as loadFacts when filter.Bucket is set.
+// SQLite epoch alignment matches loadFacts when filter.Bucket is set.
 func (r *channelMonitorV2Repository) loadIgnoredErrorCounts(
 	ctx context.Context,
 	filter service.ChannelMonitorV2Filter,
@@ -1415,20 +1472,21 @@ func (r *channelMonitorV2Repository) loadIgnoredErrorCounts(
 	bucketExpr := "e.bucket_start"
 	groupBy := "e.bucket_start, e.platform, e.model"
 	if filter.Bucket > 0 && bucketSeconds == 0 {
-		args = append([]any{fmt.Sprintf("%d seconds", int(filter.Bucket.Seconds()))}, args...)
+		args = append([]any{int(filter.Bucket.Seconds())}, args...)
 		where = shiftSQLPlaceholders(where, 1)
-		bucketExpr = "date_bin($1::interval,e.bucket_start,TIMESTAMPTZ '1970-01-01')"
+		bucketExpr = channelMonitorV2SQLiteBucketExpr("e.bucket_start", 1)
 		groupBy = bucketExpr + ", e.platform, e.model"
 	}
-	args = append(args, pq.Array(cfg.IgnoredErrorCategories), service.ChannelMonitorV2TaxonomyVersion)
-	catIdx := len(args) - 1
+	categoryClause, categoryArgs := sqlSliceIn("e.error_category", cfg.IgnoredErrorCategories, len(args)+1)
+	args = append(args, categoryArgs...)
+	args = append(args, service.ChannelMonitorV2TaxonomyVersion)
 	taxIdx := len(args)
 	query := fmt.Sprintf(
 		`SELECT %s, e.platform, e.model, SUM(e.error_requests)
 		 FROM `+channelMonitorV2ErrorMetricsTable(filter)+` e %s
-		 AND e.error_category = ANY($%d) AND e.taxonomy_version = $%d
+		 AND %s AND e.taxonomy_version = $%d
 		 GROUP BY %s`,
-		bucketExpr, where, catIdx, taxIdx, groupBy,
+		bucketExpr, where, categoryClause, taxIdx, groupBy,
 	)
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -1436,7 +1494,7 @@ func (r *channelMonitorV2Repository) loadIgnoredErrorCounts(
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
-		var bucket time.Time
+		var bucket channelMonitorV2Time
 		var platform, model string
 		var count int64
 		if err := rows.Scan(&bucket, &platform, &model, &count); err != nil {
@@ -1463,15 +1521,16 @@ func (r *channelMonitorV2Repository) loadIgnoredErrorCountsByPlatformModel(
 		return byPM, 0, nil
 	}
 	where, args, _ := channelMonitorV2WhereWithRollup(filter, cfg, "e")
-	args = append(args, pq.Array(cfg.IgnoredErrorCategories), service.ChannelMonitorV2TaxonomyVersion)
-	catIdx := len(args) - 1
+	categoryClause, categoryArgs := sqlSliceIn("e.error_category", cfg.IgnoredErrorCategories, len(args)+1)
+	args = append(args, categoryArgs...)
+	args = append(args, service.ChannelMonitorV2TaxonomyVersion)
 	taxIdx := len(args)
 	query := fmt.Sprintf(
 		`SELECT e.platform, e.model, SUM(e.error_requests)
 		 FROM `+channelMonitorV2ErrorMetricsTable(filter)+` e %s
-		 AND e.error_category = ANY($%d) AND e.taxonomy_version = $%d
+		 AND %s AND e.taxonomy_version = $%d
 		 GROUP BY e.platform, e.model`,
-		where, catIdx, taxIdx,
+		where, categoryClause, taxIdx,
 	)
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -1495,7 +1554,7 @@ func (r *channelMonitorV2Repository) loadIgnoredErrorCountsByPlatformModel(
 }
 
 // loadIgnoredErrorCountsByMatrixKey returns ignored counts keyed by matrix dimension
-// and by (dimension, bucket). Uses the same date_bin alignment as GetMatrix facts.
+// and by (dimension, bucket). Uses the same SQLite epoch alignment as GetMatrix facts.
 func (r *channelMonitorV2Repository) loadIgnoredErrorCountsByMatrixKey(
 	ctx context.Context,
 	filter service.ChannelMonitorV2Filter,
@@ -1511,20 +1570,21 @@ func (r *channelMonitorV2Repository) loadIgnoredErrorCountsByMatrixKey(
 	bucketExpr := "e.bucket_start"
 	groupSQL := "e.bucket_start, e.platform, e.group_id, e.model"
 	if filter.Bucket > 0 && bucketSeconds == 0 {
-		args = append([]any{fmt.Sprintf("%d seconds", int(filter.Bucket.Seconds()))}, args...)
+		args = append([]any{int(filter.Bucket.Seconds())}, args...)
 		where = shiftSQLPlaceholders(where, 1)
-		bucketExpr = "date_bin($1::interval,e.bucket_start,TIMESTAMPTZ '1970-01-01')"
+		bucketExpr = channelMonitorV2SQLiteBucketExpr("e.bucket_start", 1)
 		groupSQL = bucketExpr + ", e.platform, e.group_id, e.model"
 	}
-	args = append(args, pq.Array(cfg.IgnoredErrorCategories), service.ChannelMonitorV2TaxonomyVersion)
-	catIdx := len(args) - 1
+	categoryClause, categoryArgs := sqlSliceIn("e.error_category", cfg.IgnoredErrorCategories, len(args)+1)
+	args = append(args, categoryArgs...)
+	args = append(args, service.ChannelMonitorV2TaxonomyVersion)
 	taxIdx := len(args)
 	query := fmt.Sprintf(
 		`SELECT %s, e.platform, e.group_id, e.model, SUM(e.error_requests)
 		 FROM `+channelMonitorV2ErrorMetricsTable(filter)+` e %s
-		 AND e.error_category = ANY($%d) AND e.taxonomy_version = $%d
+		 AND %s AND e.taxonomy_version = $%d
 		 GROUP BY %s`,
-		bucketExpr, where, catIdx, taxIdx, groupSQL,
+		bucketExpr, where, categoryClause, taxIdx, groupSQL,
 	)
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -1532,7 +1592,7 @@ func (r *channelMonitorV2Repository) loadIgnoredErrorCountsByMatrixKey(
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
-		var bucket time.Time
+		var bucket channelMonitorV2Time
 		var platform, model string
 		var groupID, count int64
 		if err := rows.Scan(&bucket, &platform, &groupID, &model, &count); err != nil {
