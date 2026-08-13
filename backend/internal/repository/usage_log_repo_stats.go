@@ -496,22 +496,30 @@ func (r *usageLogRepository) GetBatchUserUsageStats(ctx context.Context, userIDs
 	// GROUP BY (user_id, effective_platform) 一次查询同时得到总值与按平台拆分。
 	// 应用层把同一 user_id 的多行累加为总值，并把非空 platform 行收集到 ByPlatform。
 	idClause, idArgs := sqlInt64In("ul.user_id", normalizedUserIDs, 1)
+	startArg := fmt.Sprintf("$%d", len(idArgs)+1)
+	endArg := fmt.Sprintf("$%d", len(idArgs)+2)
+	todayArg := fmt.Sprintf("$%d", len(idArgs)+3)
+	lowerBoundArg := fmt.Sprintf("$%d", len(idArgs)+4)
 	query := `
 		SELECT
 			ul.user_id,
 			` + usageLogEffectivePlatformExpr + ` as platform,
-			COALESCE(SUM(ul.actual_cost) FILTER (WHERE ul.created_at >= $2 AND ul.created_at < $3), 0) as total_cost,
-			COALESCE(SUM(ul.actual_cost) FILTER (WHERE ul.created_at >= $4), 0) as today_cost
+			COALESCE(SUM(ul.actual_cost) FILTER (WHERE ul.created_at >= ` + startArg + ` AND ul.created_at < ` + endArg + `), 0) as total_cost,
+			COALESCE(SUM(ul.actual_cost) FILTER (WHERE ul.created_at >= ` + todayArg + `), 0) as today_cost
 		FROM usage_logs ul
 		LEFT JOIN groups g ON g.id = ul.group_id
 		LEFT JOIN accounts a ON a.id = ul.account_id
 		WHERE ` + idClause + `
-		  AND ul.created_at >= LEAST($2, $4)
+		  AND ul.created_at >= ` + lowerBoundArg + `
 		  AND ` + usageLogSuccessFilterUL + `
 		GROUP BY ul.user_id, ` + usageLogEffectivePlatformExpr + `
 	`
 	today := timezone.Today()
-	rows, err := r.sql.QueryContext(ctx, query, append(idArgs, startTime, endTime, today)...)
+	lowerBound := startTime
+	if today.Before(lowerBound) {
+		lowerBound = today
+	}
+	rows, err := r.sql.QueryContext(ctx, query, append(idArgs, startTime, endTime, today, lowerBound)...)
 	if err != nil {
 		return nil, err
 	}
@@ -573,18 +581,26 @@ func (r *usageLogRepository) GetBatchAPIKeyUsageStats(ctx context.Context, apiKe
 	}
 
 	idClause, idArgs := sqlInt64In("api_key_id", normalizedAPIKeyIDs, 1)
+	startArg := fmt.Sprintf("$%d", len(idArgs)+1)
+	endArg := fmt.Sprintf("$%d", len(idArgs)+2)
+	todayArg := fmt.Sprintf("$%d", len(idArgs)+3)
+	lowerBoundArg := fmt.Sprintf("$%d", len(idArgs)+4)
 	query := `
 		SELECT
 			api_key_id,
-			COALESCE(SUM(actual_cost) FILTER (WHERE created_at >= $2 AND created_at < $3), 0) as total_cost,
-			COALESCE(SUM(actual_cost) FILTER (WHERE created_at >= $4), 0) as today_cost
+			COALESCE(SUM(actual_cost) FILTER (WHERE created_at >= ` + startArg + ` AND created_at < ` + endArg + `), 0) as total_cost,
+			COALESCE(SUM(actual_cost) FILTER (WHERE created_at >= ` + todayArg + `), 0) as today_cost
 		FROM usage_logs
 		WHERE ` + idClause + `
-		  AND created_at >= LEAST($2, $4)
+		  AND created_at >= ` + lowerBoundArg + `
 		GROUP BY api_key_id
 	`
 	today := timezone.Today()
-	rows, err := r.sql.QueryContext(ctx, query, append(idArgs, startTime, endTime, today)...)
+	lowerBound := startTime
+	if today.Before(lowerBound) {
+		lowerBound = today
+	}
+	rows, err := r.sql.QueryContext(ctx, query, append(idArgs, startTime, endTime, today, lowerBound)...)
 	if err != nil {
 		return nil, err
 	}
