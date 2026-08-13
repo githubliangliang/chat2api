@@ -119,7 +119,6 @@ backend/.installed
 tests
 !deploy/tests/
 !deploy/tests/**
-CLAUDE.md
 .claude
 scripts
 !backend/scripts/
