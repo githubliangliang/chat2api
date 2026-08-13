@@ -3,10 +3,10 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
-	"github.com/lib/pq"
 )
 
 type userGroupRateRepository struct {
@@ -178,7 +178,7 @@ func (r *userGroupRateRepository) SyncUserGroupRates(ctx context.Context, userID
 	if len(rates) == 0 {
 		if _, err := r.sql.ExecContext(ctx, `
 			UPDATE user_group_rate_multipliers
-			SET rate_multiplier = NULL, updated_at = NOW()
+			SET rate_multiplier = NULL, updated_at = CURRENT_TIMESTAMP
 			WHERE user_id = $1
 		`, userID); err != nil {
 			return err
@@ -202,36 +202,33 @@ func (r *userGroupRateRepository) SyncUserGroupRates(ctx context.Context, userID
 	}
 
 	if len(clearGroupIDs) > 0 {
+		clearClause, clearArgs := sqlInt64In("group_id", clearGroupIDs, 2)
 		if _, err := r.sql.ExecContext(ctx, `
 			UPDATE user_group_rate_multipliers
-			SET rate_multiplier = NULL, updated_at = NOW()
-			WHERE user_id = $1 AND group_id = ANY($2)
-		`, userID, pq.Array(clearGroupIDs)); err != nil {
+			SET rate_multiplier = NULL, updated_at = CURRENT_TIMESTAMP
+			WHERE user_id = $1 AND `+clearClause, append([]any{userID}, clearArgs...)...); err != nil {
 			return err
 		}
 		if _, err := r.sql.ExecContext(ctx,
-			`DELETE FROM user_group_rate_multipliers WHERE user_id = $1 AND group_id = ANY($2) AND rate_multiplier IS NULL AND rpm_override IS NULL`,
-			userID, pq.Array(clearGroupIDs)); err != nil {
+			`DELETE FROM user_group_rate_multipliers WHERE user_id = $1 AND `+clearClause+` AND rate_multiplier IS NULL AND rpm_override IS NULL`, append([]any{userID}, clearArgs...)...); err != nil {
 			return err
 		}
 	}
 
 	if len(upsertGroupIDs) > 0 {
 		now := time.Now()
-		_, err := r.sql.ExecContext(ctx, `
-			INSERT INTO user_group_rate_multipliers (user_id, group_id, rate_multiplier, created_at, updated_at)
-			SELECT
-				$1::bigint,
-				data.group_id,
-				data.rate_multiplier,
-				$2::timestamptz,
-				$2::timestamptz
-			FROM unnest($3::bigint[], $4::double precision[]) AS data(group_id, rate_multiplier)
-			ON CONFLICT (user_id, group_id)
-			DO UPDATE SET
-				rate_multiplier = EXCLUDED.rate_multiplier,
-				updated_at = EXCLUDED.updated_at
-		`, userID, now, pq.Array(upsertGroupIDs), pq.Array(upsertRates))
+		query := `INSERT INTO user_group_rate_multipliers (user_id, group_id, rate_multiplier, created_at, updated_at) VALUES `
+		args := []any{}
+		for i, gid := range upsertGroupIDs {
+			if i > 0 {
+				query += ","
+			}
+			n := 4*i + 1
+			query += fmt.Sprintf("($%d,$%d,$%d,$%d,CURRENT_TIMESTAMP)", n, n+1, n+2, n+3)
+			args = append(args, userID, gid, upsertRates[i], now)
+		}
+		query += ` ON CONFLICT (user_id, group_id) DO UPDATE SET rate_multiplier = excluded.rate_multiplier, updated_at = excluded.updated_at`
+		_, err := r.sql.ExecContext(ctx, query, args...)
 		if err != nil {
 			return err
 		}
@@ -254,17 +251,18 @@ func (r *userGroupRateRepository) SyncGroupRateMultipliers(ctx context.Context, 
 	if len(keepUserIDs) == 0 {
 		if _, err := r.sql.ExecContext(ctx, `
 			UPDATE user_group_rate_multipliers
-			SET rate_multiplier = NULL, updated_at = NOW()
+			SET rate_multiplier = NULL, updated_at = CURRENT_TIMESTAMP
 			WHERE group_id = $1
 		`, groupID); err != nil {
 			return err
 		}
 	} else {
+		keepClause, keepArgs := sqlInt64In("user_id", keepUserIDs, 2)
 		if _, err := r.sql.ExecContext(ctx, `
 			UPDATE user_group_rate_multipliers
-			SET rate_multiplier = NULL, updated_at = NOW()
-			WHERE group_id = $1 AND user_id <> ALL($2)
-		`, groupID, pq.Array(keepUserIDs)); err != nil {
+			SET rate_multiplier = NULL, updated_at = CURRENT_TIMESTAMP
+			WHERE group_id = $1 AND NOT (`+keepClause+`)
+		`, append([]any{groupID}, keepArgs...)...); err != nil {
 			return err
 		}
 	}
@@ -288,13 +286,18 @@ func (r *userGroupRateRepository) SyncGroupRateMultipliers(ctx context.Context, 
 		rates[i] = e.RateMultiplier
 	}
 	now := time.Now()
-	_, err := r.sql.ExecContext(ctx, `
-		INSERT INTO user_group_rate_multipliers (user_id, group_id, rate_multiplier, created_at, updated_at)
-		SELECT data.user_id, $1::bigint, data.rate_multiplier, $2::timestamptz, $2::timestamptz
-		FROM unnest($3::bigint[], $4::double precision[]) AS data(user_id, rate_multiplier)
-		ON CONFLICT (user_id, group_id)
-		DO UPDATE SET rate_multiplier = EXCLUDED.rate_multiplier, updated_at = EXCLUDED.updated_at
-	`, groupID, now, pq.Array(userIDs), pq.Array(rates))
+	query := `INSERT INTO user_group_rate_multipliers (user_id, group_id, rate_multiplier, created_at, updated_at) VALUES `
+	args := []any{}
+	for i, uid := range userIDs {
+		if i > 0 {
+			query += ","
+		}
+		n := 4*i + 1
+		query += fmt.Sprintf("($%d,$%d,$%d,$%d,CURRENT_TIMESTAMP)", n, n+1, n+2, n+3)
+		args = append(args, uid, groupID, rates[i], now)
+	}
+	query += ` ON CONFLICT (user_id, group_id) DO UPDATE SET rate_multiplier = excluded.rate_multiplier, updated_at = excluded.updated_at`
+	_, err := r.sql.ExecContext(ctx, query, args...)
 	return err
 }
 
@@ -321,28 +324,29 @@ func (r *userGroupRateRepository) SyncGroupRPMOverrides(ctx context.Context, gro
 	if len(keepUserIDs) == 0 {
 		if _, err := r.sql.ExecContext(ctx, `
 			UPDATE user_group_rate_multipliers
-			SET rpm_override = NULL, updated_at = NOW()
+			SET rpm_override = NULL, updated_at = CURRENT_TIMESTAMP
 			WHERE group_id = $1
 		`, groupID); err != nil {
 			return err
 		}
 	} else {
+		keepClause, keepArgs := sqlInt64In("user_id", keepUserIDs, 2)
 		if _, err := r.sql.ExecContext(ctx, `
 			UPDATE user_group_rate_multipliers
-			SET rpm_override = NULL, updated_at = NOW()
-			WHERE group_id = $1 AND user_id <> ALL($2)
-		`, groupID, pq.Array(keepUserIDs)); err != nil {
+			SET rpm_override = NULL, updated_at = CURRENT_TIMESTAMP
+			WHERE group_id = $1 AND NOT (`+keepClause+`)
+		`, append([]any{groupID}, keepArgs...)...); err != nil {
 			return err
 		}
 	}
 
 	// 显式 clear 的行。
 	if len(clearUserIDs) > 0 {
+		clearClause, clearArgs := sqlInt64In("user_id", clearUserIDs, 2)
 		if _, err := r.sql.ExecContext(ctx, `
 			UPDATE user_group_rate_multipliers
-			SET rpm_override = NULL, updated_at = NOW()
-			WHERE group_id = $1 AND user_id = ANY($2)
-		`, groupID, pq.Array(clearUserIDs)); err != nil {
+			SET rpm_override = NULL, updated_at = CURRENT_TIMESTAMP
+			WHERE group_id = $1 AND `+clearClause, append([]any{groupID}, clearArgs...)...); err != nil {
 			return err
 		}
 	}
@@ -357,13 +361,18 @@ func (r *userGroupRateRepository) SyncGroupRPMOverrides(ctx context.Context, gro
 
 	if len(upsertUserIDs) > 0 {
 		now := time.Now()
-		_, err := r.sql.ExecContext(ctx, `
-			INSERT INTO user_group_rate_multipliers (user_id, group_id, rpm_override, created_at, updated_at)
-			SELECT data.user_id, $1::bigint, data.rpm_override, $2::timestamptz, $2::timestamptz
-			FROM unnest($3::bigint[], $4::integer[]) AS data(user_id, rpm_override)
-			ON CONFLICT (user_id, group_id)
-			DO UPDATE SET rpm_override = EXCLUDED.rpm_override, updated_at = EXCLUDED.updated_at
-		`, groupID, now, pq.Array(upsertUserIDs), pq.Array(upsertValues))
+		query := `INSERT INTO user_group_rate_multipliers (user_id, group_id, rpm_override, created_at, updated_at) VALUES `
+		args := []any{}
+		for i, uid := range upsertUserIDs {
+			if i > 0 {
+				query += ","
+			}
+			n := 4*i + 1
+			query += fmt.Sprintf("($%d,$%d,$%d,$%d,CURRENT_TIMESTAMP)", n, n+1, n+2, n+3)
+			args = append(args, uid, groupID, upsertValues[i], now)
+		}
+		query += ` ON CONFLICT (user_id, group_id) DO UPDATE SET rpm_override = excluded.rpm_override, updated_at = excluded.updated_at`
+		_, err := r.sql.ExecContext(ctx, query, args...)
 		if err != nil {
 			return err
 		}
@@ -376,7 +385,7 @@ func (r *userGroupRateRepository) SyncGroupRPMOverrides(ctx context.Context, gro
 func (r *userGroupRateRepository) ClearGroupRPMOverrides(ctx context.Context, groupID int64) error {
 	if _, err := r.sql.ExecContext(ctx, `
 		UPDATE user_group_rate_multipliers
-		SET rpm_override = NULL, updated_at = NOW()
+		SET rpm_override = NULL, updated_at = CURRENT_TIMESTAMP
 		WHERE group_id = $1
 	`, groupID); err != nil {
 		return err

@@ -57,7 +57,7 @@ INSERT INTO content_moderation_logs (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7,
     $8, $9, $10, $11, $12, $13, $14, $15,
-    $16::jsonb, $17::jsonb, $18, $19, $20,
+    $16, $17, $18, $19, $20,
     $21, $22, $23, $24, $25
 ) RETURNING id, created_at`,
 		log.RequestID, userID, log.UserEmail, apiKeyID, log.APIKeyName, groupID, log.GroupName,

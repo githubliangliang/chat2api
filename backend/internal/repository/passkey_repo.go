@@ -11,7 +11,6 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/go-webauthn/webauthn/webauthn"
-	"github.com/lib/pq"
 )
 
 type passkeyRepository struct {
@@ -132,13 +131,12 @@ func (r *passkeyRepository) Create(
 	err = r.db.QueryRowContext(ctx, `
 		INSERT INTO passkey_credentials
 		    (user_id, credential_id, name, credential_data)
-		VALUES ($1, $2, $3, $4::jsonb)
+		VALUES ($1, $2, $3, $4)
 		RETURNING id, name, created_at, updated_at
 	`, record.UserID, record.Credential.ID, name, string(credentialJSON)).
 		Scan(&created.ID, &created.Name, &created.CreatedAt, &created.UpdatedAt)
 	if err != nil {
-		var pqErr *pq.Error
-		if errors.As(err, &pqErr) && pqErr.Code == "23505" {
+		if strings.Contains(strings.ToLower(err.Error()), "unique constraint") || strings.Contains(strings.ToLower(err.Error()), "duplicate key") {
 			return nil, service.ErrPasskeyExists
 		}
 		return nil, fmt.Errorf("create passkey credential: %w", err)
@@ -161,7 +159,7 @@ func (r *passkeyRepository) UpdateCredential(
 	}
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE passkey_credentials
-		SET credential_data = $3::jsonb, last_used_at = $4, updated_at = NOW()
+		SET credential_data = $3, last_used_at = $4, updated_at = CURRENT_TIMESTAMP
 		WHERE user_id = $1 AND credential_id = $2
 	`, userID, credential.ID, string(credentialJSON), usedAt.UTC())
 	if err != nil {
