@@ -1,3 +1,8 @@
+# Single-package workspace so allowBuilds is valid; packages is required by pnpm.
+packages:
+  - '.'
+
+# Allow known-safe postinstall scripts (esbuild binary, vue-demi switch)
 allowBuilds:
   esbuild: true
   vue-demi: true
