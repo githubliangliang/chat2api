@@ -13,7 +13,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
-	"github.com/lib/pq"
 
 	"entgo.io/ent/dialect"
 	entsql "entgo.io/ent/dialect/sql"
@@ -932,6 +931,7 @@ func (r *groupRepository) loadAccountCounts(ctx context.Context, groupIDs []int6
 		return counts, nil
 	}
 
+	idClause, idArgs := sqlInt64In("ag.group_id", groupIDs, 1)
 	rows, err := r.sql.QueryContext(
 		ctx,
 		fmt.Sprintf(`SELECT ag.group_id,
@@ -940,9 +940,8 @@ func (r *groupRepository) loadAccountCounts(ctx context.Context, groupIDs []int6
 			COUNT(*) FILTER (WHERE %s) AS rate_limited
 		FROM account_groups ag
 		JOIN accounts a ON a.id = ag.account_id
-		WHERE ag.group_id = ANY($1)
-		GROUP BY ag.group_id`, groupAccountAvailableSQL, groupAccountTemporarilyLimitedSQL),
-		pq.Array(groupIDs),
+		WHERE %s
+		GROUP BY ag.group_id`, groupAccountAvailableSQL, groupAccountTemporarilyLimitedSQL, idClause), idArgs...,
 	)
 	if err != nil {
 		return nil, err
@@ -975,11 +974,9 @@ func (r *groupRepository) GetAccountIDsByGroupIDs(ctx context.Context, groupIDs 
 		return nil, nil
 	}
 
-	rows, err := r.sql.QueryContext(
-		ctx,
-		"SELECT DISTINCT account_id FROM account_groups WHERE group_id = ANY($1) ORDER BY account_id",
-		pq.Array(groupIDs),
-	)
+	idClause, idArgs := sqlInt64In("group_id", groupIDs, 1)
+	rows, err := r.sql.QueryContext(ctx,
+		"SELECT DISTINCT account_id FROM account_groups WHERE "+idClause+" ORDER BY account_id", idArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -1006,15 +1003,15 @@ func (r *groupRepository) BindAccountsToGroup(ctx context.Context, groupID int64
 		return nil
 	}
 
-	// 使用 INSERT ... ON CONFLICT DO NOTHING 忽略已存在的绑定
-	_, err := r.sql.ExecContext(
-		ctx,
-		`INSERT INTO account_groups (account_id, group_id, priority, created_at)
-		 SELECT unnest($1::bigint[]), $2, 50, NOW()
-		 ON CONFLICT (account_id, group_id) DO NOTHING`,
-		pq.Array(accountIDs),
-		groupID,
-	)
+	values := make([]string, len(accountIDs))
+	args := make([]any, 0, len(accountIDs)*2)
+	for i, accountID := range accountIDs {
+		values[i] = fmt.Sprintf("($%d, $%d, 50, CURRENT_TIMESTAMP)", len(args)+1, len(args)+2)
+		args = append(args, accountID, groupID)
+	}
+	_, err := r.sql.ExecContext(ctx,
+		`INSERT INTO account_groups (account_id, group_id, priority, created_at) VALUES `+
+			strings.Join(values, ",")+` ON CONFLICT (account_id, group_id) DO NOTHING`, args...)
 	if err != nil {
 		return err
 	}
@@ -1073,7 +1070,8 @@ func (r *groupRepository) UpdateSortOrders(ctx context.Context, updates []servic
 		args = append(args, id, sortOrderByID[id])
 		placeholder += 2
 	}
-	args = append(args, pq.Array(groupIDs))
+	groupClause, groupArgs := sqlInt64In("id", groupIDs, placeholder)
+	args = append(args, groupArgs...)
 
 	query := fmt.Sprintf(`
 		UPDATE groups
@@ -1081,8 +1079,8 @@ func (r *groupRepository) UpdateSortOrders(ctx context.Context, updates []servic
 			%s
 			ELSE sort_order
 		END
-		WHERE deleted_at IS NULL AND id = ANY($%d)
-	`, strings.Join(caseClauses, "\n\t\t\t"), placeholder)
+		WHERE deleted_at IS NULL AND %s
+	`, strings.Join(caseClauses, "\n\t\t\t"), groupClause)
 
 	result, err := r.sql.ExecContext(ctx, query, args...)
 	if err != nil {
