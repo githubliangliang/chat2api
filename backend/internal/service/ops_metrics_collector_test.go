@@ -84,3 +84,29 @@ func TestOpsMetricsCollectorQueryErrorCountsExcludesCountTokens(t *testing.T) {
 	require.NoError(t, db.Close())
 	require.NoError(t, mock.ExpectationsWereMet())
 }
+
+func TestOpsMetricsCollectorQueryAccountSwitchCountSQLite(t *testing.T) {
+	db, err := sql.Open("sqlite", "file:ops-metrics-switch-count?mode=memory&cache=shared")
+	require.NoError(t, err)
+	defer db.Close()
+	require.NoError(t, func() error {
+		_, err := db.Exec(`CREATE TABLE ops_error_logs (
+			created_at DATETIME, is_count_tokens BOOLEAN, upstream_errors TEXT
+		)`)
+		return err
+	}())
+	require.NoError(t, func() error {
+		_, err := db.Exec(`INSERT INTO ops_error_logs VALUES
+			('2026-05-26 10:10:00', 0, '[{"kind":"failover:account"},{"kind":"retry"}]'),
+			('2026-05-26 10:20:00', 0, '[{"kind":"retry_exhausted_failover:model"}]'),
+			('2026-05-26 10:30:00', 1, '[{"kind":"failover:ignored"}]'),
+			('2026-05-26 10:40:00', 0, NULL)`)
+		return err
+	}())
+
+	collector := &OpsMetricsCollector{db: db}
+	start := time.Date(2026, 5, 26, 10, 0, 0, 0, time.UTC)
+	count, err := collector.queryAccountSwitchCount(context.Background(), start, start.Add(time.Hour))
+	require.NoError(t, err)
+	require.Equal(t, int64(2), count)
+}

@@ -195,9 +195,9 @@ FROM content_moderation_logs
 WHERE user_id = $1
   AND flagged = TRUE
   AND action <> 'hash_block'
-  AND ($3::bool IS FALSE OR action <> 'cyber_policy')
+  AND (NOT $3 OR action <> 'cyber_policy')
   AND created_at >= $2
-  AND created_at > COALESCE((SELECT at FROM last_auto_ban), '-infinity'::timestamptz)
+  AND created_at > COALESCE((SELECT at FROM last_auto_ban), '0001-01-01')
 `, userID, since, excludeCyberPolicy).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("count user content moderation flagged logs: %w", err)

@@ -557,13 +557,18 @@ func (c *OpsMetricsCollector) queryAccountSwitchCount(ctx context.Context, start
 	q := `
 SELECT
   COALESCE(SUM(CASE
-    WHEN split_part(ev->>'kind', ':', 1) IN ('failover', 'retry_exhausted_failover', 'failover_on_400') THEN 1
+    WHEN CASE
+      WHEN instr(json_extract(ev.value, '$.kind'), ':') > 0
+      THEN substr(json_extract(ev.value, '$.kind'), 1, instr(json_extract(ev.value, '$.kind'), ':') - 1)
+      ELSE json_extract(ev.value, '$.kind')
+    END IN ('failover', 'retry_exhausted_failover', 'failover_on_400') THEN 1
     ELSE 0
   END), 0) AS switch_count
 FROM ops_error_logs o
-CROSS JOIN LATERAL jsonb_array_elements(
-  COALESCE(NULLIF(o.upstream_errors, 'null'::jsonb), '[]'::jsonb)
-) AS ev
+JOIN json_each(CASE
+  WHEN json_valid(o.upstream_errors) AND json_type(o.upstream_errors) = 'array' THEN o.upstream_errors
+  ELSE '[]'
+END) AS ev
 WHERE o.created_at >= $1 AND o.created_at < $2
   AND o.is_count_tokens = FALSE`
 

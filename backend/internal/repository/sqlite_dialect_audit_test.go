@@ -32,6 +32,18 @@ func TestProductionSQLUsesSQLiteDialect(t *testing.T) {
 		regexp.MustCompile(`(?i)\bINTERVAL\s+'`),
 		regexp.MustCompile(`(?i)\bjsonb_[a-z_]+\s*\(`),
 		regexp.MustCompile(`(?i)\bpg_(try_)?advisory_(xact_)?(un)?lock\s*\(`),
+		regexp.MustCompile(`(?i)\bCROSS\s+JOIN\s+LATERAL\b`),
+		regexp.MustCompile(`(?i)\bFULL\s+OUTER\s+JOIN\b`),
+		regexp.MustCompile(`(?i)\bGROUPING\s+SETS\b`),
+		regexp.MustCompile(`(?i)\bPERCENTILE_CONT\s*\(`),
+		regexp.MustCompile(`(?i)\bDATE_BIN\s*\(`),
+		regexp.MustCompile(`(?i)\bMAKE_INTERVAL\s*\(`),
+		regexp.MustCompile(`(?i)\bSPLIT_PART\s*\(`),
+		regexp.MustCompile(`(?i)\bAT\s+TIME\s+ZONE\b`),
+		regexp.MustCompile(`(?i)\bTIMESTAMPTZ\b`),
+		regexp.MustCompile(`(?i)\bREGEXP_REPLACE\s*\(`),
+		regexp.MustCompile(`(?i)\bUNNEST\s*\(`),
+		regexp.MustCompile(`(?i)\bARRAY\s*\[`),
 	}
 
 	var violations []string

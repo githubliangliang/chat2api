@@ -11,8 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"entgo.io/ent/dialect"
-
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
@@ -736,19 +734,6 @@ func (s *PaymentService) tryClaimAffiliateRebateAudit(ctx context.Context, clien
 
 func buildAffiliateRebateAuditClaimQuery(client *dbent.Client, orderID, detail string) (string, []any) {
 	nowExpr := paymentAuditCurrentTimestampExpr(client)
-	if paymentAuditDialect(client) == dialect.Postgres {
-		return fmt.Sprintf(`
-INSERT INTO payment_audit_logs (order_id, action, detail, operator, created_at)
-SELECT $1::text, 'AFFILIATE_REBATE_APPLIED', $2::text, 'system', %s
-WHERE NOT EXISTS (
-	SELECT 1
-	FROM payment_audit_logs
-	WHERE order_id = $1::text
-	  AND action IN ('AFFILIATE_REBATE_APPLIED', 'AFFILIATE_REBATE_SKIPPED')
-)
-ON CONFLICT (order_id, action) DO NOTHING
-RETURNING id`, nowExpr), []any{orderID, detail}
-	}
 	return fmt.Sprintf(`
 INSERT INTO payment_audit_logs (order_id, action, detail, operator, created_at)
 SELECT ?, 'AFFILIATE_REBATE_APPLIED', ?, 'system', %s
@@ -763,17 +748,8 @@ RETURNING id`, nowExpr), []any{orderID, detail, orderID}
 }
 
 func paymentAuditCurrentTimestampExpr(client *dbent.Client) string {
-	if paymentAuditDialect(client) == dialect.Postgres {
-		return "NOW()"
-	}
+	_ = client
 	return "CURRENT_TIMESTAMP"
-}
-
-func paymentAuditDialect(client *dbent.Client) string {
-	if client == nil || client.Driver() == nil {
-		return ""
-	}
-	return client.Driver().Dialect()
 }
 
 func (s *PaymentService) updateClaimedAffiliateRebateAudit(ctx context.Context, client *dbent.Client, orderID int64, action string, detail map[string]any) error {
