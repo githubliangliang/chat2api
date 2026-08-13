@@ -800,6 +800,43 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 			client = tx.Client()
 		}
 	}
+	if client != nil && client.Driver().Dialect() == dialect.SQLite {
+		current, err := client.Account.Get(ctx, id)
+		if err != nil {
+			if dbent.IsNotFound(err) {
+				return service.ErrAccountNotFound
+			}
+			return err
+		}
+		nextCredentials := normalizeJSONMap(credentials)
+		extra := normalizeJSONMap(current.Extra)
+		if current.Type == service.AccountTypeAPIKey && !jsonMapsEqual(normalizeJSONMap(current.Credentials), nextCredentials) {
+			delete(extra, service.UpstreamBillingProbeExtraKey)
+			if service.IsOllamaCloudUsageAccount(&service.Account{Platform: current.Platform, Type: current.Type, Credentials: current.Credentials}) {
+				delete(extra, service.OllamaCloudUsageSessionExtraKey)
+				delete(extra, service.OllamaCloudUsageAutoRefreshExtraKey)
+				delete(extra, service.OllamaCloudUsageSnapshotExtraKey)
+			}
+		}
+		builder := client.Account.UpdateOneID(id).SetCredentials(nextCredentials).SetExtra(extra)
+		updated, err := builder.Save(ctx)
+		if err != nil {
+			return err
+		}
+		if err := enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
+			return err
+		}
+		if tx != nil {
+			if err := tx.Commit(); err != nil {
+				return err
+			}
+		}
+		if contextTx == nil {
+			r.syncSchedulerAccountSnapshot(baseCtx, id)
+		}
+		_ = updated
+		return nil
+	}
 	result, err := client.ExecContext(ctx, `
 		UPDATE accounts
 		SET

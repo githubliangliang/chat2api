@@ -4,11 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
+
+	"entgo.io/ent/dialect"
 )
 
 const (
@@ -53,14 +57,37 @@ func (r *accountRepository) ListOllamaCloudUsageGroupAccounts(ctx context.Contex
 	if len(keys) == 0 {
 		return []service.Account{}, nil
 	}
-	rows, err := r.sql.QueryContext(ctx, `
+	eligibleSQL := ollamaCloudUsageEligibleSQL
+	if r.client != nil && r.client.Driver().Dialect() == dialect.SQLite {
+		// SQLite JSON1 has no PostgreSQL regex/jsonb operators. The service only
+		// accepts these canonical Ollama hosts, so compare normalized URL values.
+		eligibleSQL = `
+	platform IN ('openai', 'anthropic')
+	AND type = 'apikey'
+	AND lower(trim(json_extract(credentials, '$.base_url'))) IN (
+		'https://ollama.com', 'https://ollama.com/v1', 'https://ollama.com:443',
+		'https://ollama.com:443/v1', 'https://www.ollama.com', 'https://www.ollama.com/v1',
+		'https://www.ollama.com:443', 'https://www.ollama.com:443/v1'
+	)
+	AND json_type(credentials, '$.api_key') = 'text'
+`
+	}
+	query := `
 		SELECT id
 		FROM accounts
 		WHERE deleted_at IS NULL
-			AND `+ollamaCloudUsageEligibleSQL+`
+		AND `+eligibleSQL+`
 			AND credentials ->> 'api_key' = ANY($1)
 		ORDER BY id
-	`, pq.Array(keys))
+	`
+	args := []any{pq.Array(keys)}
+	if r.client != nil && r.client.Driver().Dialect() == dialect.SQLite {
+		placeholders := make([]string, len(keys))
+		args = make([]any, len(keys))
+		for i, key := range keys { placeholders[i] = fmt.Sprintf("$%d", i+1); args[i] = key }
+		query = strings.Replace(query, "credentials ->> 'api_key' = ANY($1)", "credentials ->> 'api_key' IN ("+strings.Join(placeholders, ",")+")", 1)
+	}
+	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -75,6 +102,9 @@ func (r *accountRepository) ListOllamaCloudUsageGroupAccounts(ctx context.Contex
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+	if len(ids) == 0 || r.client == nil {
+		return []service.Account{}, nil
 	}
 	hydrated, err := r.GetByIDs(ctx, ids)
 	if err != nil {
