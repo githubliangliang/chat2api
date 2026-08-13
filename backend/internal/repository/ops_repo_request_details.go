@@ -87,17 +87,17 @@ func (r *opsRepository) ListRequestDetails(ctx context.Context, filter *service.
 	cte := `
 WITH combined AS (
   SELECT
-    'success'::TEXT AS kind,
+    'success' AS kind,
     ul.created_at AS created_at,
     ul.request_id AS request_id,
     COALESCE(NULLIF(g.platform, ''), NULLIF(a.platform, ''), '') AS platform,
     ul.model AS model,
     ul.duration_ms AS duration_ms,
-    NULL::INT AS status_code,
-    NULL::BIGINT AS error_id,
-    NULL::TEXT AS phase,
-    NULL::TEXT AS severity,
-    NULL::TEXT AS message,
+    NULL AS status_code,
+    NULL AS error_id,
+    NULL AS phase,
+    NULL AS severity,
+    NULL AS message,
     ul.user_id AS user_id,
     ul.api_key_id AS api_key_id,
     ul.account_id AS account_id,
@@ -111,7 +111,7 @@ WITH combined AS (
   UNION ALL
 
   SELECT
-    'error'::TEXT AS kind,
+    'error' AS kind,
     o.created_at AS created_at,
     COALESCE(NULLIF(o.request_id,''), NULLIF(o.client_request_id,''), '') AS request_id,
     COALESCE(NULLIF(o.platform, ''), NULLIF(g.platform, ''), NULLIF(a.platform, ''), '') AS platform,

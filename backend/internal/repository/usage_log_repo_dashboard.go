@@ -241,7 +241,7 @@ func (r *usageLogRepository) fillDashboardUsageStatsAggregated(ctx context.Conte
 			account_cost as today_account_cost,
 			active_users as active_users
 		FROM usage_dashboard_daily
-		WHERE bucket_date = $1::date
+		WHERE bucket_date = date($1)
 	`
 	if err := scanSingleRow(
 		ctx,
@@ -294,27 +294,27 @@ func (r *usageLogRepository) fillDashboardUsageStatsFromUsageLogs(ctx context.Co
 				COALESCE(account_stats_cost, total_cost) * COALESCE(account_rate_multiplier, 1) AS account_cost,
 				COALESCE(duration_ms, 0) AS duration_ms
 			FROM usage_logs
-			WHERE created_at >= LEAST($1::timestamptz, $3::timestamptz)
-				AND created_at < GREATEST($2::timestamptz, $4::timestamptz)
+			WHERE created_at >= CASE WHEN $1 < $3 THEN $1 ELSE $3 END
+				AND created_at < CASE WHEN $2 > $4 THEN $2 ELSE $4 END
 		)
 		SELECT
-			COUNT(*) FILTER (WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz) AS total_requests,
-			COALESCE(SUM(input_tokens) FILTER (WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz), 0) AS total_input_tokens,
-			COALESCE(SUM(output_tokens) FILTER (WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz), 0) AS total_output_tokens,
-			COALESCE(SUM(cache_creation_tokens) FILTER (WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz), 0) AS total_cache_creation_tokens,
-			COALESCE(SUM(cache_read_tokens) FILTER (WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz), 0) AS total_cache_read_tokens,
-			COALESCE(SUM(total_cost) FILTER (WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz), 0) AS total_cost,
-			COALESCE(SUM(actual_cost) FILTER (WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz), 0) AS total_actual_cost,
-			COALESCE(SUM(account_cost) FILTER (WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz), 0) AS total_account_cost,
-			COALESCE(SUM(duration_ms) FILTER (WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz), 0) AS total_duration_ms,
-			COUNT(*) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz) AS today_requests,
-			COALESCE(SUM(input_tokens) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz), 0) AS today_input_tokens,
-			COALESCE(SUM(output_tokens) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz), 0) AS today_output_tokens,
-			COALESCE(SUM(cache_creation_tokens) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz), 0) AS today_cache_creation_tokens,
-			COALESCE(SUM(cache_read_tokens) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz), 0) AS today_cache_read_tokens,
-			COALESCE(SUM(total_cost) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz), 0) AS today_cost,
-			COALESCE(SUM(actual_cost) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz), 0) AS today_actual_cost,
-			COALESCE(SUM(account_cost) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz), 0) AS today_account_cost
+			COUNT(*) FILTER (WHERE created_at >= $1 AND created_at < $2) AS total_requests,
+			COALESCE(SUM(input_tokens) FILTER (WHERE created_at >= $1 AND created_at < $2), 0) AS total_input_tokens,
+			COALESCE(SUM(output_tokens) FILTER (WHERE created_at >= $1 AND created_at < $2), 0) AS total_output_tokens,
+			COALESCE(SUM(cache_creation_tokens) FILTER (WHERE created_at >= $1 AND created_at < $2), 0) AS total_cache_creation_tokens,
+			COALESCE(SUM(cache_read_tokens) FILTER (WHERE created_at >= $1 AND created_at < $2), 0) AS total_cache_read_tokens,
+			COALESCE(SUM(total_cost) FILTER (WHERE created_at >= $1 AND created_at < $2), 0) AS total_cost,
+			COALESCE(SUM(actual_cost) FILTER (WHERE created_at >= $1 AND created_at < $2), 0) AS total_actual_cost,
+			COALESCE(SUM(account_cost) FILTER (WHERE created_at >= $1 AND created_at < $2), 0) AS total_account_cost,
+			COALESCE(SUM(duration_ms) FILTER (WHERE created_at >= $1 AND created_at < $2), 0) AS total_duration_ms,
+			COUNT(*) FILTER (WHERE created_at >= $3 AND created_at < $4) AS today_requests,
+			COALESCE(SUM(input_tokens) FILTER (WHERE created_at >= $3 AND created_at < $4), 0) AS today_input_tokens,
+			COALESCE(SUM(output_tokens) FILTER (WHERE created_at >= $3 AND created_at < $4), 0) AS today_output_tokens,
+			COALESCE(SUM(cache_creation_tokens) FILTER (WHERE created_at >= $3 AND created_at < $4), 0) AS today_cache_creation_tokens,
+			COALESCE(SUM(cache_read_tokens) FILTER (WHERE created_at >= $3 AND created_at < $4), 0) AS today_cache_read_tokens,
+			COALESCE(SUM(total_cost) FILTER (WHERE created_at >= $3 AND created_at < $4), 0) AS today_cost,
+			COALESCE(SUM(actual_cost) FILTER (WHERE created_at >= $3 AND created_at < $4), 0) AS today_actual_cost,
+			COALESCE(SUM(account_cost) FILTER (WHERE created_at >= $3 AND created_at < $4), 0) AS today_account_cost
 		FROM scoped
 	`
 	var totalDurationMs int64
@@ -356,12 +356,12 @@ func (r *usageLogRepository) fillDashboardUsageStatsFromUsageLogs(ctx context.Co
 		WITH scoped AS (
 			SELECT user_id, created_at
 			FROM usage_logs
-			WHERE created_at >= LEAST($1::timestamptz, $3::timestamptz)
-				AND created_at < GREATEST($2::timestamptz, $4::timestamptz)
+			WHERE created_at >= CASE WHEN $1 < $3 THEN $1 ELSE $3 END
+				AND created_at < CASE WHEN $2 > $4 THEN $2 ELSE $4 END
 		)
 		SELECT
-			COUNT(DISTINCT CASE WHEN created_at >= $1::timestamptz AND created_at < $2::timestamptz THEN user_id END) AS active_users,
-			COUNT(DISTINCT CASE WHEN created_at >= $3::timestamptz AND created_at < $4::timestamptz THEN user_id END) AS hourly_active_users
+			COUNT(DISTINCT CASE WHEN created_at >= $1 AND created_at < $2 THEN user_id END) AS active_users,
+			COUNT(DISTINCT CASE WHEN created_at >= $3 AND created_at < $4 THEN user_id END) AS hourly_active_users
 		FROM scoped
 	`
 	if err := scanSingleRow(ctx, r.sql, activeUsersQuery, []any{todayUTC, todayEnd, hourStart, hourEnd}, &stats.ActiveUsers, &stats.HourlyActiveUsers); err != nil {

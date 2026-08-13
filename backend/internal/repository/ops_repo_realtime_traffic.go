@@ -40,7 +40,7 @@ func (r *opsRepository) GetRealtimeTrafficSummary(ctx context.Context, filter *s
 	q := `
 WITH usage_buckets AS (
   SELECT
-    date_trunc('minute', ul.created_at) AS bucket,
+    datetime(strftime('%Y-%m-%d %H:%M:00', ul.created_at)) AS bucket,
     COALESCE(COUNT(*), 0) AS success_count,
     COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens), 0) AS token_sum
   FROM usage_logs ul
@@ -50,7 +50,7 @@ WITH usage_buckets AS (
 ),
 error_buckets AS (
   SELECT
-    date_trunc('minute', created_at) AS bucket,
+    datetime(strftime('%Y-%m-%d %H:%M:00', created_at)) AS bucket,
     COALESCE(COUNT(*), 0) AS error_count
   FROM ops_error_logs
   ` + errorWhere + `
@@ -59,13 +59,17 @@ error_buckets AS (
 ),
 combined AS (
   SELECT
-    COALESCE(u.bucket, e.bucket) AS bucket,
-    COALESCE(u.success_count, 0) AS success_count,
-    COALESCE(u.token_sum, 0) AS token_sum,
-    COALESCE(e.error_count, 0) AS error_count,
-    COALESCE(u.success_count, 0) + COALESCE(e.error_count, 0) AS request_total
-  FROM usage_buckets u
-  FULL OUTER JOIN error_buckets e ON u.bucket = e.bucket
+    bucket,
+    SUM(success_count) AS success_count,
+    SUM(token_sum) AS token_sum,
+    SUM(error_count) AS error_count,
+    SUM(success_count) + SUM(error_count) AS request_total
+  FROM (
+    SELECT bucket, success_count, token_sum, 0 AS error_count FROM usage_buckets
+    UNION ALL
+    SELECT bucket, 0, 0, error_count FROM error_buckets
+  ) buckets
+  GROUP BY bucket
 )
 SELECT
   COALESCE(SUM(success_count), 0) AS success_total,

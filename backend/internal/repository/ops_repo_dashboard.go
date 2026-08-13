@@ -812,23 +812,34 @@ FROM usage_logs ul
 func (r *opsRepository) queryUsageLatency(ctx context.Context, filter *service.OpsDashboardFilter, start, end time.Time) (duration service.OpsPercentiles, ttft service.OpsPercentiles, ttftSampleCount int64, err error) {
 	join, where, args, _ := buildUsageWhere(filter, start, end, 1)
 	q := `
+WITH base AS (
+  SELECT duration_ms, first_token_ms
+  FROM usage_logs ul
+  ` + join + `
+  ` + where + `
+),
+duration_ranked AS (
+  SELECT duration_ms, ROW_NUMBER() OVER (ORDER BY duration_ms) AS rn, COUNT(*) OVER () AS cnt
+  FROM base WHERE duration_ms IS NOT NULL
+),
+ttft_ranked AS (
+  SELECT first_token_ms, ROW_NUMBER() OVER (ORDER BY first_token_ms) AS rn, COUNT(*) OVER () AS cnt
+  FROM base WHERE first_token_ms IS NOT NULL
+)
 SELECT
-  percentile_cont(0.50) WITHIN GROUP (ORDER BY duration_ms) FILTER (WHERE duration_ms IS NOT NULL) AS duration_p50,
-  percentile_cont(0.90) WITHIN GROUP (ORDER BY duration_ms) FILTER (WHERE duration_ms IS NOT NULL) AS duration_p90,
-  percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms) FILTER (WHERE duration_ms IS NOT NULL) AS duration_p95,
-  percentile_cont(0.99) WITHIN GROUP (ORDER BY duration_ms) FILTER (WHERE duration_ms IS NOT NULL) AS duration_p99,
-  AVG(duration_ms) FILTER (WHERE duration_ms IS NOT NULL) AS duration_avg,
-  MAX(duration_ms) AS duration_max,
-  percentile_cont(0.50) WITHIN GROUP (ORDER BY first_token_ms) FILTER (WHERE first_token_ms IS NOT NULL) AS ttft_p50,
-  percentile_cont(0.90) WITHIN GROUP (ORDER BY first_token_ms) FILTER (WHERE first_token_ms IS NOT NULL) AS ttft_p90,
-  percentile_cont(0.95) WITHIN GROUP (ORDER BY first_token_ms) FILTER (WHERE first_token_ms IS NOT NULL) AS ttft_p95,
-  percentile_cont(0.99) WITHIN GROUP (ORDER BY first_token_ms) FILTER (WHERE first_token_ms IS NOT NULL) AS ttft_p99,
-  AVG(first_token_ms) FILTER (WHERE first_token_ms IS NOT NULL) AS ttft_avg,
-  MAX(first_token_ms) AS ttft_max,
-  COUNT(first_token_ms) AS ttft_sample_count
-FROM usage_logs ul
-` + join + `
-` + where
+  (SELECT MAX(CASE WHEN rn = CAST((cnt * 50 + 99) / 100 AS INTEGER) THEN duration_ms END) FROM duration_ranked),
+  (SELECT MAX(CASE WHEN rn = CAST((cnt * 90 + 99) / 100 AS INTEGER) THEN duration_ms END) FROM duration_ranked),
+  (SELECT MAX(CASE WHEN rn = CAST((cnt * 95 + 99) / 100 AS INTEGER) THEN duration_ms END) FROM duration_ranked),
+  (SELECT MAX(CASE WHEN rn = CAST((cnt * 99 + 99) / 100 AS INTEGER) THEN duration_ms END) FROM duration_ranked),
+  (SELECT AVG(duration_ms) FROM base WHERE duration_ms IS NOT NULL),
+  (SELECT MAX(duration_ms) FROM base),
+  (SELECT MAX(CASE WHEN rn = CAST((cnt * 50 + 99) / 100 AS INTEGER) THEN first_token_ms END) FROM ttft_ranked),
+  (SELECT MAX(CASE WHEN rn = CAST((cnt * 90 + 99) / 100 AS INTEGER) THEN first_token_ms END) FROM ttft_ranked),
+  (SELECT MAX(CASE WHEN rn = CAST((cnt * 95 + 99) / 100 AS INTEGER) THEN first_token_ms END) FROM ttft_ranked),
+  (SELECT MAX(CASE WHEN rn = CAST((cnt * 99 + 99) / 100 AS INTEGER) THEN first_token_ms END) FROM ttft_ranked),
+  (SELECT AVG(first_token_ms) FROM base WHERE first_token_ms IS NOT NULL),
+  (SELECT MAX(first_token_ms) FROM base),
+  (SELECT COUNT(first_token_ms) FROM base)`
 
 	var dP50, dP90, dP95, dP99 sql.NullFloat64
 	var dAvg sql.NullFloat64
@@ -926,7 +937,7 @@ func (r *opsRepository) queryPeakRates(ctx context.Context, filter *service.OpsD
 	q := `
 WITH usage_buckets AS (
   SELECT
-    date_trunc('minute', ul.created_at) AS bucket,
+    datetime(strftime('%Y-%m-%d %H:%M:00', ul.created_at)) AS bucket,
     COUNT(*) AS req_cnt,
     COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens), 0) AS token_cnt
   FROM usage_logs ul
@@ -935,18 +946,22 @@ WITH usage_buckets AS (
   GROUP BY 1
 ),
 error_buckets AS (
-  SELECT date_trunc('minute', created_at) AS bucket, COUNT(*) AS err_cnt
+  SELECT datetime(strftime('%Y-%m-%d %H:%M:00', created_at)) AS bucket, COUNT(*) AS err_cnt
   FROM ops_error_logs
   ` + errorWhere + `
     AND COALESCE(status_code, 0) >= 400
   GROUP BY 1
 ),
 combined AS (
-  SELECT COALESCE(u.bucket, e.bucket) AS bucket,
-         COALESCE(u.req_cnt, 0) + COALESCE(e.err_cnt, 0) AS total_req,
-         COALESCE(u.token_cnt, 0) AS total_tokens
-  FROM usage_buckets u
-  FULL OUTER JOIN error_buckets e ON u.bucket = e.bucket
+  SELECT bucket,
+         SUM(req_cnt) + SUM(err_cnt) AS total_req,
+         SUM(token_cnt) AS total_tokens
+  FROM (
+    SELECT bucket, req_cnt, 0 AS err_cnt, token_cnt FROM usage_buckets
+    UNION ALL
+    SELECT bucket, 0, err_cnt, 0 FROM error_buckets
+  ) buckets
+  GROUP BY bucket
 )
 SELECT
   COALESCE(MAX(total_req), 0) AS max_req_per_min,

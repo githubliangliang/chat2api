@@ -59,13 +59,16 @@ error_buckets AS (
 switch_buckets AS (
   SELECT ` + errorBucketExpr + ` AS bucket,
          COALESCE(SUM(CASE
-           WHEN split_part(ev->>'kind', ':', 1) IN ('failover', 'retry_exhausted_failover', 'failover_on_400') THEN 1
+           WHEN substr(json_extract(ev.value, '$.kind'), 1,
+                       instr(json_extract(ev.value, '$.kind') || ':', ':') - 1)
+                IN ('failover', 'retry_exhausted_failover', 'failover_on_400') THEN 1
            ELSE 0
          END), 0) AS switch_count
   FROM ops_error_logs
-  CROSS JOIN LATERAL jsonb_array_elements(
-    COALESCE(NULLIF(upstream_errors, 'null'::jsonb), '[]'::jsonb)
-  ) AS ev
+  CROSS JOIN json_each(CASE
+    WHEN json_valid(upstream_errors) AND json_type(upstream_errors) = 'array' THEN upstream_errors
+    ELSE '[]'
+  END) AS ev
   ` + errorWhere + `
     AND upstream_errors IS NOT NULL
   GROUP BY 1
@@ -107,13 +110,14 @@ ORDER BY bucket ASC`
 
 	points := make([]*service.OpsThroughputTrendPoint, 0, 256)
 	for rows.Next() {
-		var bucket time.Time
+		var bucketUnix int64
 		var requests int64
 		var tokens sql.NullInt64
 		var switches sql.NullInt64
-		if err := rows.Scan(&bucket, &requests, &tokens, &switches); err != nil {
+		if err := rows.Scan(&bucketUnix, &requests, &tokens, &switches); err != nil {
 			return nil, err
 		}
+		bucket := time.Unix(bucketUnix, 0).UTC()
 		tokenConsumed := int64(0)
 		if tokens.Valid {
 			tokenConsumed = tokens.Int64
@@ -206,12 +210,16 @@ error_totals AS (
   GROUP BY 1
 ),
 combined AS (
-  SELECT COALESCE(u.platform, e.platform) AS platform,
-         COALESCE(u.success_count, 0) AS success_count,
-         COALESCE(e.error_count, 0) AS error_count,
-         COALESCE(u.token_consumed, 0) AS token_consumed
-  FROM usage_totals u
-  FULL OUTER JOIN error_totals e ON u.platform = e.platform
+  SELECT platform,
+         SUM(success_count) AS success_count,
+         SUM(error_count) AS error_count,
+         SUM(token_consumed) AS token_consumed
+  FROM (
+    SELECT platform, success_count, 0 AS error_count, token_consumed FROM usage_totals
+    UNION ALL
+    SELECT platform, 0, error_count, 0 FROM error_totals
+  ) totals
+  GROUP BY platform
 )
 SELECT platform, (success_count + error_count) AS request_count, token_consumed
 FROM combined
@@ -280,14 +288,18 @@ error_totals AS (
   GROUP BY 1
 ),
 combined AS (
-  SELECT COALESCE(u.group_id, e.group_id) AS group_id,
-         COALESCE(u.group_name, g2.name, '') AS group_name,
-         COALESCE(u.success_count, 0) AS success_count,
-         COALESCE(e.error_count, 0) AS error_count,
-         COALESCE(u.token_consumed, 0) AS token_consumed
-  FROM usage_totals u
-  FULL OUTER JOIN error_totals e ON u.group_id = e.group_id
-  LEFT JOIN groups g2 ON g2.id = COALESCE(u.group_id, e.group_id)
+  SELECT totals.group_id,
+         COALESCE(MAX(NULLIF(totals.group_name, '')), MAX(g2.name), '') AS group_name,
+         SUM(totals.success_count) AS success_count,
+         SUM(totals.error_count) AS error_count,
+         SUM(totals.token_consumed) AS token_consumed
+  FROM (
+    SELECT group_id, group_name, success_count, 0 AS error_count, token_consumed FROM usage_totals
+    UNION ALL
+    SELECT group_id, '' AS group_name, 0, error_count, 0 FROM error_totals
+  ) totals
+  LEFT JOIN groups g2 ON g2.id = totals.group_id
+  GROUP BY totals.group_id
 )
 SELECT group_id, group_name, (success_count + error_count) AS request_count, token_consumed
 FROM combined
@@ -334,22 +346,22 @@ LIMIT $4`
 func opsBucketExprForUsage(bucketSeconds int) string {
 	switch bucketSeconds {
 	case 3600:
-		return "datetime(strftime('%Y-%m-%d %H:00:00', ul.created_at))"
+		return "(CAST(strftime('%s', ul.created_at) AS INTEGER) / 3600) * 3600"
 	case 300:
-		return "datetime((CAST(strftime('%s', ul.created_at) AS INTEGER) / 300) * 300, 'unixepoch')"
+		return "(CAST(strftime('%s', ul.created_at) AS INTEGER) / 300) * 300"
 	default:
-		return "datetime(strftime('%Y-%m-%d %H:%M:00', ul.created_at))"
+		return "(CAST(strftime('%s', ul.created_at) AS INTEGER) / 60) * 60"
 	}
 }
 
 func opsBucketExprForError(bucketSeconds int) string {
 	switch bucketSeconds {
 	case 3600:
-		return "datetime(strftime('%Y-%m-%d %H:00:00', created_at))"
+		return "(CAST(strftime('%s', created_at) AS INTEGER) / 3600) * 3600"
 	case 300:
-		return "datetime((CAST(strftime('%s', created_at) AS INTEGER) / 300) * 300, 'unixepoch')"
+		return "(CAST(strftime('%s', created_at) AS INTEGER) / 300) * 300"
 	default:
-		return "datetime(strftime('%Y-%m-%d %H:%M:00', created_at))"
+		return "(CAST(strftime('%s', created_at) AS INTEGER) / 60) * 60"
 	}
 }
 
@@ -469,11 +481,12 @@ ORDER BY 1 ASC`
 
 	points := make([]*service.OpsErrorTrendPoint, 0, 256)
 	for rows.Next() {
-		var bucket time.Time
+		var bucketUnix int64
 		var total, businessLimited, sla, upstreamExcl, upstream429, upstream529 int64
-		if err := rows.Scan(&bucket, &total, &businessLimited, &sla, &upstreamExcl, &upstream429, &upstream529); err != nil {
+		if err := rows.Scan(&bucketUnix, &total, &businessLimited, &sla, &upstreamExcl, &upstream429, &upstream529); err != nil {
 			return nil, err
 		}
+		bucket := time.Unix(bucketUnix, 0).UTC()
 		points = append(points, &service.OpsErrorTrendPoint{
 			BucketStart: bucket.UTC(),
 

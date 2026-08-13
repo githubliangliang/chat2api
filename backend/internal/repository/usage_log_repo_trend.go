@@ -26,9 +26,22 @@ type UserSpendingRankingResponse = usagestats.UserSpendingRankingResponse
 // APIKeyUsageTrendPoint represents API key usage trend data point
 type APIKeyUsageTrendPoint = usagestats.APIKeyUsageTrendPoint
 
+func sqliteUsageDateFormat(granularity string) string {
+	switch granularity {
+	case "hour":
+		return "%Y-%m-%d %H:00"
+	case "week":
+		return "%Y-%W"
+	case "month":
+		return "%Y-%m"
+	default:
+		return "%Y-%m-%d"
+	}
+}
+
 // GetAPIKeyUsageTrend returns usage trend data grouped by API key and date
 func (r *usageLogRepository) GetAPIKeyUsageTrend(ctx context.Context, startTime, endTime time.Time, granularity string, limit int) (results []APIKeyUsageTrendPoint, err error) {
-	dateFormat := safeDateFormat(granularity)
+	dateFormat := sqliteUsageDateFormat(granularity)
 
 	query := fmt.Sprintf(`
 		WITH top_keys AS (
@@ -40,7 +53,7 @@ func (r *usageLogRepository) GetAPIKeyUsageTrend(ctx context.Context, startTime,
 			LIMIT $3
 		)
 		SELECT
-			TO_CHAR(u.created_at, '%s') as date,
+			strftime('%s', u.created_at) as date,
 			u.api_key_id,
 			COALESCE(k.name, '') as key_name,
 			COUNT(*) as requests,
@@ -83,7 +96,7 @@ func (r *usageLogRepository) GetAPIKeyUsageTrend(ctx context.Context, startTime,
 
 // GetUserUsageTrend returns usage trend data grouped by user and date
 func (r *usageLogRepository) GetUserUsageTrend(ctx context.Context, startTime, endTime time.Time, granularity string, limit int) (results []UserUsageTrendPoint, err error) {
-	dateFormat := safeDateFormat(granularity)
+	dateFormat := sqliteUsageDateFormat(granularity)
 
 	query := fmt.Sprintf(`
 		WITH top_users AS (
@@ -95,7 +108,7 @@ func (r *usageLogRepository) GetUserUsageTrend(ctx context.Context, startTime, e
 			LIMIT $3
 		)
 		SELECT
-			TO_CHAR(u.created_at, '%s') as date,
+			strftime('%s', u.created_at) as date,
 			u.user_id,
 			COALESCE(us.email, '') as email,
 			COALESCE(us.username, '') as username,
@@ -224,11 +237,11 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 
 // GetUserUsageTrendByUserID 获取指定用户的使用趋势
 func (r *usageLogRepository) GetUserUsageTrendByUserID(ctx context.Context, userID int64, startTime, endTime time.Time, granularity string) (results []TrendDataPoint, err error) {
-	dateFormat := safeDateFormat(granularity)
+	dateFormat := sqliteUsageDateFormat(granularity)
 
 	query := fmt.Sprintf(`
 		SELECT
-			TO_CHAR(created_at, '%s') as date,
+			strftime('%s', created_at) as date,
 			COUNT(*) as requests,
 			COALESCE(SUM(input_tokens), 0) as input_tokens,
 			COALESCE(SUM(output_tokens), 0) as output_tokens,
@@ -285,11 +298,11 @@ func (r *usageLogRepository) getUsageTrendWithFilters(ctx context.Context, start
 		}
 	}
 
-	dateFormat := safeDateFormat(granularity)
+	dateFormat := sqliteUsageDateFormat(granularity)
 
 	query := fmt.Sprintf(`
 		SELECT
-			TO_CHAR(created_at, '%s') as date,
+			strftime('%s', created_at) as date,
 			COUNT(*) as requests,
 			COALESCE(SUM(input_tokens), 0) as input_tokens,
 			COALESCE(SUM(output_tokens), 0) as output_tokens,
@@ -368,7 +381,7 @@ func shouldUsePreaggregatedTrend(granularity string, userID, apiKeyID, accountID
 }
 
 func (r *usageLogRepository) getUsageTrendFromAggregates(ctx context.Context, startTime, endTime time.Time, granularity string) (results []TrendDataPoint, err error) {
-	dateFormat := safeDateFormat(granularity)
+	dateFormat := sqliteUsageDateFormat(granularity)
 	query := ""
 	args := []any{startTime, endTime}
 
@@ -376,7 +389,7 @@ func (r *usageLogRepository) getUsageTrendFromAggregates(ctx context.Context, st
 	case "hour":
 		query = fmt.Sprintf(`
 			SELECT
-				TO_CHAR(bucket_start, '%s') as date,
+				strftime('%s', bucket_start) as date,
 				total_requests as requests,
 				input_tokens,
 				output_tokens,
@@ -392,7 +405,7 @@ func (r *usageLogRepository) getUsageTrendFromAggregates(ctx context.Context, st
 	case "day":
 		query = fmt.Sprintf(`
 			SELECT
-				TO_CHAR(bucket_date::timestamp, '%s') as date,
+				strftime('%s', bucket_date) as date,
 				total_requests as requests,
 				input_tokens,
 				output_tokens,
@@ -402,7 +415,7 @@ func (r *usageLogRepository) getUsageTrendFromAggregates(ctx context.Context, st
 				total_cost as cost,
 				actual_cost
 			FROM usage_dashboard_daily
-			WHERE bucket_date >= $1::date AND bucket_date < $2::date
+			WHERE bucket_date >= date($1) AND bucket_date < date($2)
 			ORDER BY bucket_date ASC
 		`, dateFormat)
 	default:
