@@ -40,7 +40,7 @@ redis:
 
 # 关掉运维监控后台任务（定时采集/聚合/告警，省 CPU/内存）
 ops:
-  enabled: false
+  enabled: true
   use_preaggregated_tables: false
   cleanup:
     enabled: false

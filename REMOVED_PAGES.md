@@ -34,7 +34,8 @@
 
 ## 后端
 
-- 不注册：dashboard / announcements / redeem / promo / ops 管理路由
+- 不注册：dashboard / announcements / redeem / promo 管理路由
+- ops：页面 `/admin/ops` 仍下线，但保留 `/api/v1/admin/ops/*`（用量页错误请求依赖）
 - 不注册：用户 announcements / redeem / subscriptions / channel-monitors
 - 不注册：`RegisterPaymentRoutes`
 - 不注册：`registerAffiliateRoutes` 及用户 `/user/aff*`

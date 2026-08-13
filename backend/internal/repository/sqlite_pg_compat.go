@@ -28,6 +28,20 @@ func registerSQLitePGCompatFunctions() {
 		_ = sqlite.RegisterScalarFunction("least", -1, sqliteNumericExtreme(false))
 		// TO_CHAR(ts, format) — usage trend/stats bucketing (hour/day/week/month).
 		_ = sqlite.RegisterScalarFunction("to_char", 2, sqliteToChar)
+		// HOST(inet) — PG inet helper; SQLite stores client_ip as TEXT so return as-is.
+		_ = sqlite.RegisterScalarFunction("host", 1, func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
+			if len(args) == 0 || args[0] == nil {
+				return nil, nil
+			}
+			switch v := args[0].(type) {
+			case string:
+				return v, nil
+			case []byte:
+				return string(v), nil
+			default:
+				return fmt.Sprint(v), nil
+			}
+		})
 	})
 }
 
