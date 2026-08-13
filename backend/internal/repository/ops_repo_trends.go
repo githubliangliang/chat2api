@@ -334,23 +334,22 @@ LIMIT $4`
 func opsBucketExprForUsage(bucketSeconds int) string {
 	switch bucketSeconds {
 	case 3600:
-		return "date_trunc('hour', ul.created_at)"
+		return "datetime(strftime('%Y-%m-%d %H:00:00', ul.created_at))"
 	case 300:
-		// 5-minute buckets in UTC.
-		return "to_timestamp(floor(extract(epoch from ul.created_at) / 300) * 300)"
+		return "datetime((CAST(strftime('%s', ul.created_at) AS INTEGER) / 300) * 300, 'unixepoch')"
 	default:
-		return "date_trunc('minute', ul.created_at)"
+		return "datetime(strftime('%Y-%m-%d %H:%M:00', ul.created_at))"
 	}
 }
 
 func opsBucketExprForError(bucketSeconds int) string {
 	switch bucketSeconds {
 	case 3600:
-		return "date_trunc('hour', created_at)"
+		return "datetime(strftime('%Y-%m-%d %H:00:00', created_at))"
 	case 300:
-		return "to_timestamp(floor(extract(epoch from created_at) / 300) * 300)"
+		return "datetime((CAST(strftime('%s', created_at) AS INTEGER) / 300) * 300, 'unixepoch')"
 	default:
-		return "date_trunc('minute', created_at)"
+		return "datetime(strftime('%Y-%m-%d %H:%M:00', created_at))"
 	}
 }
 

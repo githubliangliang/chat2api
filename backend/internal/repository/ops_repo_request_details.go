@@ -151,7 +151,7 @@ WITH combined AS (
 		case "", "created_at_desc":
 			// default
 		case "duration_desc":
-			sort = "ORDER BY duration_ms DESC NULLS LAST, created_at DESC"
+			sort = "ORDER BY duration_ms IS NULL, duration_ms DESC, created_at DESC"
 		default:
 			return nil, 0, fmt.Errorf("invalid sort")
 		}

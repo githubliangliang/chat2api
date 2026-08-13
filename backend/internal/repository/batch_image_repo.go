@@ -225,7 +225,7 @@ func (r *batchImageRepository) UpdateBatchImageJobProviderSubmit(ctx context.Con
 
 func (r *batchImageRepository) updateBatchImageJobProviderSubmitWithSQL(ctx context.Context, sqlq batchImageSQLExecutor, params service.UpdateBatchImageJobProviderSubmitParams) error {
 	var current string
-	if err := sqlq.QueryRowContext(ctx, `SELECT status FROM batch_image_jobs WHERE batch_id = $1 FOR UPDATE`, params.BatchID).Scan(&current); err != nil {
+	if err := sqlq.QueryRowContext(ctx, `SELECT status FROM batch_image_jobs WHERE batch_id = $1`, params.BatchID).Scan(&current); err != nil {
 		return translatePersistenceError(err, service.ErrBatchImageJobNotFound, nil)
 	}
 	if !service.CanTransitionBatchImageJob(current, service.BatchImageJobStatusSubmitted) {
@@ -356,7 +356,7 @@ RETURNING retry_count`, batchID, code, message, time.Now()).Scan(&retryCount)
 
 func (r *batchImageRepository) transitionBatchImageJobStatusWithSQL(ctx context.Context, sqlq batchImageSQLExecutor, batchID, toStatus string, opts service.BatchImageTransitionOptions) error {
 	var current string
-	if err := sqlq.QueryRowContext(ctx, `SELECT status FROM batch_image_jobs WHERE batch_id = $1 FOR UPDATE`, batchID).Scan(&current); err != nil {
+	if err := sqlq.QueryRowContext(ctx, `SELECT status FROM batch_image_jobs WHERE batch_id = $1`, batchID).Scan(&current); err != nil {
 		return translatePersistenceError(err, service.ErrBatchImageJobNotFound, nil)
 	}
 	if !service.CanTransitionBatchImageJob(current, toStatus) {
@@ -371,16 +371,16 @@ func (r *batchImageRepository) transitionBatchImageJobStatusWithSQL(ctx context.
 	if _, err := sqlq.ExecContext(ctx, `
 UPDATE batch_image_jobs
 SET
-    status = $2::varchar,
+    status = $2,
     version = version + 1,
     updated_at = $3,
-    last_error_code = CASE WHEN $2::varchar = 'failed' THEN $4 ELSE last_error_code END,
-    last_error_message = CASE WHEN $2::varchar = 'failed' THEN $5 ELSE last_error_message END,
-    submitted_at = CASE WHEN $2::varchar = 'submitted' AND submitted_at IS NULL THEN $3 ELSE submitted_at END,
-    started_at = CASE WHEN $2::varchar = 'running' AND started_at IS NULL THEN $3 ELSE started_at END,
-    finished_at = CASE WHEN $2::varchar IN ('completed', 'failed', 'cancelled') AND finished_at IS NULL THEN $3 ELSE finished_at END,
-    settled_at = CASE WHEN $2::varchar = 'completed' AND settled_at IS NULL THEN $3 ELSE settled_at END,
-    output_deleted_at = CASE WHEN $2::varchar = 'output_deleted' AND output_deleted_at IS NULL THEN $3 ELSE output_deleted_at END
+    last_error_code = CASE WHEN $2 = 'failed' THEN $4 ELSE last_error_code END,
+    last_error_message = CASE WHEN $2 = 'failed' THEN $5 ELSE last_error_message END,
+    submitted_at = CASE WHEN $2 = 'submitted' AND submitted_at IS NULL THEN $3 ELSE submitted_at END,
+    started_at = CASE WHEN $2 = 'running' AND started_at IS NULL THEN $3 ELSE started_at END,
+    finished_at = CASE WHEN $2 IN ('completed', 'failed', 'cancelled') AND finished_at IS NULL THEN $3 ELSE finished_at END,
+    settled_at = CASE WHEN $2 = 'completed' AND settled_at IS NULL THEN $3 ELSE settled_at END,
+    output_deleted_at = CASE WHEN $2 = 'output_deleted' AND output_deleted_at IS NULL THEN $3 ELSE output_deleted_at END
 WHERE batch_id = $1`, batchID, toStatus, now, opts.ErrorCode, opts.ErrorMessage); err != nil {
 		return err
 	}
@@ -450,7 +450,7 @@ func (r *batchImageRepository) ReplaceBatchImageItemsForJob(ctx context.Context,
 func (r *batchImageRepository) replaceBatchImageItemsForJobWithSQL(ctx context.Context, sqlq batchImageSQLExecutor, batchID string, items []service.CreateBatchImageItemParams, counts service.BatchImageCounts) error {
 	var id int64
 	var status string
-	if err := sqlq.QueryRowContext(ctx, `SELECT id, status FROM batch_image_jobs WHERE batch_id = $1 FOR UPDATE`, batchID).Scan(&id, &status); err != nil {
+	if err := sqlq.QueryRowContext(ctx, `SELECT id, status FROM batch_image_jobs WHERE batch_id = $1`, batchID).Scan(&id, &status); err != nil {
 		return translatePersistenceError(err, service.ErrBatchImageJobNotFound, nil)
 	}
 	// 仅允许 indexing 状态重建 item 表：防止锁过期后掉队的 worker
