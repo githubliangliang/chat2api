@@ -26,22 +26,22 @@ SELECT ua.user_id,
        COALESCE(u.email, ''),
        COALESCE(u.username, ''),
        ua.aff_code,
-       COALESCE(ua.aff_rebate_rate_percent, 0)::double precision,
+       COALESCE(ua.aff_rebate_rate_percent, 0),
        (ua.aff_rebate_rate_percent IS NOT NULL) AS has_custom_rate,
        ua.aff_count,
        COALESCE(rebated.rebated_invitee_count, 0),
-       (ua.aff_quota + COALESCE(matured.matured_frozen_quota, 0))::double precision,
-       ua.aff_history_quota::double precision
+       (ua.aff_quota + COALESCE(matured.matured_frozen_quota, 0)),
+       ua.aff_history_quota
 FROM user_affiliates ua
 JOIN users u ON u.id = ua.user_id
 LEFT JOIN (
-    SELECT user_id, COUNT(DISTINCT source_user_id)::integer AS rebated_invitee_count
+    SELECT user_id, COUNT(DISTINCT source_user_id) AS rebated_invitee_count
     FROM user_affiliate_ledger
     WHERE action = 'accrue' AND source_user_id IS NOT NULL
     GROUP BY user_id
 ) rebated ON rebated.user_id = ua.user_id
 LEFT JOIN (
-    SELECT user_id, COALESCE(SUM(amount), 0)::double precision AS matured_frozen_quota
+    SELECT user_id, COALESCE(SUM(amount), 0) AS matured_frozen_quota
     FROM user_affiliate_ledger
     WHERE action = 'accrue' AND frozen_until IS NOT NULL AND frozen_until <= NOW()
     GROUP BY user_id
@@ -164,7 +164,7 @@ VALUES ($1, 'accrue', $2, $3, $4, NOW(), NOW())`, inviterID, amount, inviteeUser
 func (r *affiliateRepository) GetAccruedRebateFromInvitee(ctx context.Context, inviterID, inviteeUserID int64) (float64, error) {
 	client := clientFromContext(ctx, r.client)
 	rows, err := client.QueryContext(ctx,
-		`SELECT COALESCE(SUM(amount), 0)::double precision FROM user_affiliate_ledger WHERE user_id = $1 AND source_user_id = $2 AND action = 'accrue'`,
+		`SELECT COALESCE(SUM(amount), 0) FROM user_affiliate_ledger WHERE user_id = $1 AND source_user_id = $2 AND action = 'accrue'`,
 		inviterID, inviteeUserID)
 	if err != nil {
 		return 0, fmt.Errorf("query accrued rebate from invitee: %w", err)
@@ -246,23 +246,9 @@ func (r *affiliateRepository) TransferQuotaToBalance(ctx context.Context, userID
 		}
 
 		rows, err := txClient.QueryContext(txCtx, `
-WITH claimed AS (
-	SELECT aff_quota::double precision AS amount
-	FROM user_affiliates
-	WHERE user_id = $1
-	  AND aff_quota > 0
-	FOR UPDATE
-),
-cleared AS (
-	UPDATE user_affiliates ua
-	SET aff_quota = 0,
-	    updated_at = NOW()
-	FROM claimed c
-	WHERE ua.user_id = $1
-	RETURNING c.amount
-)
-SELECT amount
-FROM cleared`, userID)
+SELECT aff_quota
+FROM user_affiliates
+WHERE user_id = $1 AND aff_quota > 0`, userID)
 		if err != nil {
 			return fmt.Errorf("claim affiliate quota: %w", err)
 		}
@@ -282,6 +268,16 @@ FROM cleared`, userID)
 			return err
 		}
 		if transferred <= 0 {
+			return service.ErrAffiliateQuotaEmpty
+		}
+		result, err := txClient.ExecContext(txCtx, `
+UPDATE user_affiliates
+SET aff_quota = 0, updated_at = CURRENT_TIMESTAMP
+WHERE user_id = $1 AND aff_quota = $2`, userID, transferred)
+		if err != nil {
+			return fmt.Errorf("clear affiliate quota: %w", err)
+		}
+		if affected, err := result.RowsAffected(); err != nil || affected != 1 {
 			return service.ErrAffiliateQuotaEmpty
 		}
 
@@ -350,7 +346,7 @@ SELECT ua.user_id,
        COALESCE(u.email, ''),
        COALESCE(u.username, ''),
        ua.created_at,
-       COALESCE(SUM(ual.amount), 0)::double precision AS total_rebate
+       COALESCE(SUM(ual.amount), 0) AS total_rebate
 FROM user_affiliates ua
 LEFT JOIN users u ON u.id = ua.user_id
 LEFT JOIN user_affiliate_ledger ual
@@ -416,7 +412,7 @@ SELECT ua.inviter_id,
        COALESCE(invitee.email, ''),
        COALESCE(invitee.username, ''),
        COALESCE(inviter_aff.aff_code, ''),
-       COALESCE(SUM(ual.amount), 0)::double precision AS total_rebate,
+       COALESCE(SUM(ual.amount), 0) AS total_rebate,
        ua.created_at
 FROM user_affiliates ua
 JOIN users invitee ON invitee.id = ua.user_id
@@ -502,9 +498,9 @@ SELECT po.id,
        ual.source_user_id,
        COALESCE(invitee.email, ''),
        COALESCE(invitee.username, ''),
-       po.amount::double precision,
-       po.pay_amount::double precision,
-       ual.amount::double precision,
+       po.amount,
+       po.pay_amount,
+       ual.amount,
        po.payment_type,
        po.status,
        ual.created_at
@@ -578,11 +574,11 @@ SELECT ual.id,
        ual.user_id,
        COALESCE(u.email, ''),
        COALESCE(u.username, ''),
-       ual.amount::double precision,
-       ual.balance_after::double precision,
-       ual.aff_quota_after::double precision,
-       ual.aff_frozen_quota_after::double precision,
-       ual.aff_history_quota_after::double precision,
+       ual.amount,
+       ual.balance_after,
+       ual.aff_quota_after,
+       ual.aff_frozen_quota_after,
+       ual.aff_history_quota_after,
        ual.created_at
 `+baseJoin+where+`
 `+orderBy+`
@@ -785,9 +781,9 @@ SELECT user_id,
        aff_rebate_rate_percent,
        inviter_id,
        aff_count,
-       aff_quota::double precision,
-       aff_frozen_quota::double precision,
-       aff_history_quota::double precision,
+       aff_quota,
+       aff_frozen_quota,
+       aff_history_quota,
        created_at,
        updated_at
 FROM user_affiliates
@@ -839,9 +835,9 @@ SELECT user_id,
        aff_rebate_rate_percent,
        inviter_id,
        aff_count,
-       aff_quota::double precision,
-       aff_frozen_quota::double precision,
-       aff_history_quota::double precision,
+       aff_quota,
+       aff_frozen_quota,
+       aff_history_quota,
        created_at,
        updated_at
 FROM user_affiliates
@@ -889,7 +885,7 @@ LIMIT 1`, strings.ToUpper(strings.TrimSpace(code)))
 
 func queryUserBalance(ctx context.Context, client affiliateQueryExecer, userID int64) (float64, error) {
 	rows, err := client.QueryContext(ctx,
-		"SELECT balance::double precision FROM users WHERE id = $1 LIMIT 1",
+		"SELECT balance FROM users WHERE id = $1 LIMIT 1",
 		userID,
 	)
 	if err != nil {
@@ -918,10 +914,10 @@ type affiliateTransferSnapshot struct {
 
 func queryAffiliateTransferSnapshot(ctx context.Context, client affiliateQueryExecer, userID int64) (*affiliateTransferSnapshot, error) {
 	rows, err := client.QueryContext(ctx, `
-SELECT u.balance::double precision,
-       ua.aff_quota::double precision,
-       ua.aff_frozen_quota::double precision,
-       ua.aff_history_quota::double precision
+SELECT u.balance,
+       ua.aff_quota,
+       ua.aff_frozen_quota,
+       ua.aff_history_quota
 FROM users u
 JOIN user_affiliates ua ON ua.user_id = u.id
 WHERE u.id = $1
