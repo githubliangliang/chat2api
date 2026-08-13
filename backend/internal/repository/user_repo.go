@@ -891,10 +891,10 @@ func (r *userRepository) DeductAvailableBalance(ctx context.Context, id int64, a
 	if amount < 0 {
 		return 0, fmt.Errorf("deduction amount must be nonnegative")
 	}
-	if r.client != nil && r.client.Driver().Dialect() == dialect.SQLite {
+	{
 		db, ok := r.sql.(*sql.DB)
 		if !ok {
-			return 0, fmt.Errorf("sqlite balance update requires sql db")
+			return 0, fmt.Errorf("balance update requires sql db")
 		}
 		tx, err := db.BeginTx(ctx, nil)
 		if err != nil {
@@ -923,40 +923,6 @@ func (r *userRepository) DeductAvailableBalance(ctx context.Context, id int64, a
 		}
 		return deducted, nil
 	}
-	const updateSQL = `
-		WITH target AS (
-			SELECT id, balance
-			FROM users
-			WHERE id = $2 AND deleted_at IS NULL
-			FOR UPDATE
-		), updated AS (
-			UPDATE users AS u
-			SET balance = target.balance - LEAST($1, GREATEST(target.balance, 0)), updated_at = NOW()
-			FROM target
-			WHERE u.id = target.id AND u.deleted_at IS NULL
-			RETURNING target.balance - u.balance AS deducted
-		)
-		SELECT deducted FROM updated
-	`
-	rows, err := clientFromContext(ctx, r.client).QueryContext(ctx, updateSQL, amount, id)
-	if err != nil {
-		return 0, err
-	}
-	defer func() {
-		if closeErr := rows.Close(); closeErr != nil && err == nil {
-			err = closeErr
-		}
-	}()
-	if !rows.Next() {
-		if rowsErr := rows.Err(); rowsErr != nil {
-			return 0, rowsErr
-		}
-		return 0, service.ErrUserNotFound
-	}
-	if err := rows.Scan(&deducted); err != nil {
-		return 0, err
-	}
-	return deducted, rows.Err()
 }
 
 // AdjustBalance 原子地把 delta 累加到余额上，结果为负时整条语句不生效。

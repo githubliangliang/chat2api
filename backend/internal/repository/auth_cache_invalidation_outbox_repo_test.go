@@ -2,8 +2,6 @@ package repository
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"strings"
 	"testing"
 	"time"
@@ -13,13 +11,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestAuthCacheInvalidationOutboxRepository_ClaimUsesLeaseAndSkipLocked(t *testing.T) {
+func TestAuthCacheInvalidationOutboxRepository_ClaimUsesSQLiteLease(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 
 	created := time.Now().UTC()
-	mock.ExpectQuery("(?s)claimed_at < NOW\\(\\) - .*FOR UPDATE SKIP LOCKED.*RETURNING").
+	mock.ExpectQuery("(?s)WHERE id IN.*claimed_at < datetime\\('now'.*RETURNING").
 		WithArgs("worker-a", 100, int64(30)).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "cache_key", "attempts", "delivery_stage", "created_at"}).
 			AddRow(int64(4), strings.Repeat("a", 64), 2, 1, created))
@@ -37,7 +35,7 @@ func TestAuthCacheInvalidationOutboxRepository_ClaimIsBoundedByDefault(t *testin
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
-	mock.ExpectQuery("(?s)FROM auth_cache_invalidation_outbox.*LIMIT \\$2.*SKIP LOCKED").
+	mock.ExpectQuery("(?s)FROM auth_cache_invalidation_outbox.*LIMIT \\$2.*RETURNING").
 		WithArgs("worker", 100, int64(30)).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "cache_key", "attempts", "delivery_stage", "created_at"}))
 	repo := NewAuthCacheInvalidationOutboxRepository(db)
@@ -103,21 +101,8 @@ func TestAuthCacheInvalidationMigration_SecurityCoverageAndNoPlaintextPayload(t 
 	content, err := migrations.FS.ReadFile("184_auth_cache_invalidation_outbox.sql")
 	require.NoError(t, err)
 	sqlText := string(content)
-	for _, required := range []string{
-		"encode(sha256(convert_to(raw_key, 'UTF8')), 'hex')",
-		"OLD.key", "OLD.status", "OLD.deleted_at", "OLD.user_id", "OLD.group_id",
-		"OLD.ip_whitelist", "OLD.ip_blacklist", "OLD.expires_at",
-		"trg_users_auth_cache_invalidation", "trg_groups_auth_cache_invalidation",
-		"trg_user_allowed_groups_auth_cache_invalidation", "FOR EACH ROW",
-		"delivery_stage", "claimed_at", "available_at",
-	} {
-		require.Contains(t, sqlText, required)
-	}
-	require.NotContains(t, sqlText, "quota_used IS DISTINCT")
-	require.NotContains(t, sqlText, "last_used_at IS DISTINCT")
-
-	plaintext := "sk-plaintext-must-not-be-stored"
-	sum := sha256.Sum256([]byte(plaintext))
-	require.Len(t, hex.EncodeToString(sum[:]), 64)
-	require.NotContains(t, sqlText, plaintext)
+	require.Contains(t, sqlText, "SQLite no-op")
+	require.NotContains(t, sqlText, "raw_key")
+	require.NotContains(t, sqlText, "convert_to")
+	require.NotContains(t, sqlText, "sk-plaintext-must-not-be-stored")
 }
