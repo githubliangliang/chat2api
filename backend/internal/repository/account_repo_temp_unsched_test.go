@@ -9,9 +9,13 @@ import (
 	"testing"
 	"time"
 
+	"entgo.io/ent/dialect"
+	entsql "entgo.io/ent/dialect/sql"
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
+	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
+	_ "modernc.org/sqlite"
 )
 
 func TestAccountRepository_SetTempUnschedulable_NoRowsAffectedDoesNotWriteOutbox(t *testing.T) {
@@ -305,6 +309,32 @@ func TestAccountRepository_ListOAuthRefreshCandidatePage_SQLFilter(t *testing.T)
 	require.NoError(t, err)
 	require.Contains(t, platforms, service.PlatformGrok)
 	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestAccountRepository_ListOAuthRefreshCandidatePageSQLite(t *testing.T) {
+	db, err := sql.Open("sqlite", "file:oauth-refresh-candidates?mode=memory&cache=shared")
+	require.NoError(t, err)
+	defer db.Close()
+	_, err = db.Exec(`CREATE TABLE accounts (
+		id INTEGER PRIMARY KEY, deleted_at DATETIME, schedulable BOOLEAN,
+		platform TEXT, status TEXT, type TEXT, credentials TEXT,
+		temp_unschedulable_until DATETIME, temp_unschedulable_reason TEXT,
+		name TEXT, extra TEXT, concurrency INTEGER, priority INTEGER
+	)`)
+	require.NoError(t, err)
+	client := dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.SQLite, db)))
+	repo := newAccountRepositoryWithSQL(client, db, nil)
+
+	page, err := repo.ListOAuthRefreshCandidatePage(context.Background(), service.OAuthRefreshPageOptions{
+		Platforms:            []string{service.PlatformAnthropic, service.PlatformOpenAI},
+		Limit:                20,
+		ActiveOnly:           true,
+		RequireRefreshToken:  true,
+		IncludeSetupToken:    false,
+		ExcludeRetryCooldown: true,
+	})
+	require.NoError(t, err)
+	require.Empty(t, page.Accounts)
 }
 
 func TestAccountRepository_ListOAuthRefreshCandidatePage_ReconciliationExcludesAPIKeys(t *testing.T) {

@@ -1195,6 +1195,7 @@ func (r *accountRepository) ListOAuthRefreshCandidatePage(ctx context.Context, o
 		return nil, errors.New("oauth refresh candidate page limit must be between 1 and 1000")
 	}
 
+	isSQLite := r.client != nil && r.client.Driver().Dialect() == dialect.SQLite
 	// (cond) IS NOT TRUE 把 NULL 和 FALSE 都视为"可被刷新"。直接写
 	// NOT (a AND b) 在 PG 三值逻辑下会把 a 或 b 为 NULL 的行（即绝大多数
 	// 健康账号：temp_unschedulable_until=NULL）也排除，导致后台 token
@@ -1206,6 +1207,25 @@ func (r *accountRepository) ListOAuthRefreshCandidatePage(ctx context.Context, o
 			AND schedulable = TRUE
 			AND platform = ANY($1)
 			AND id > $2`
+	args := []any{pq.Array(options.Platforms), options.AfterID}
+	if isSQLite {
+		placeholders := make([]string, len(options.Platforms))
+		for i := range placeholders {
+			placeholders[i] = "?"
+		}
+		query = fmt.Sprintf(`
+		SELECT id
+		FROM accounts
+		WHERE deleted_at IS NULL
+			AND schedulable = 1
+			AND platform IN (%s)
+			AND id > ?`, strings.Join(placeholders, ", "))
+		args = make([]any, 0, len(options.Platforms)+2)
+		for _, platform := range options.Platforms {
+			args = append(args, platform)
+		}
+		args = append(args, options.AfterID)
+	}
 	if options.ActiveOnly {
 		query += `
 			AND status = 'active'`
@@ -1218,22 +1238,40 @@ func (r *accountRepository) ListOAuthRefreshCandidatePage(ctx context.Context, o
 			AND type = 'oauth'`
 	}
 	if options.RequireRefreshToken {
-		query += `
+		if isSQLite {
+			query += `
+			AND json_extract(credentials, '$.refresh_token') IS NOT NULL
+			AND trim(json_extract(credentials, '$.refresh_token')) <> ''`
+		} else {
+			query += `
 			AND credentials ? 'refresh_token'
 			AND btrim(credentials->>'refresh_token') <> ''`
+		}
 	}
 	if options.ExcludeRetryCooldown {
-		query += `
+		if isSQLite {
+			query += `
+			AND NOT (
+				temp_unschedulable_until > CURRENT_TIMESTAMP
+				AND temp_unschedulable_reason LIKE 'token refresh retry exhausted:%'
+			)`
+		} else {
+			query += `
 			AND (
 				temp_unschedulable_until > NOW()
 				AND temp_unschedulable_reason LIKE 'token refresh retry exhausted:%'
 			) IS NOT TRUE`
+		}
 	}
 	query += `
 		ORDER BY id ASC
 		LIMIT $3`
+	if isSQLite {
+		query = strings.Replace(query, "LIMIT $3", "LIMIT ?", 1)
+	}
+	args = append(args, options.Limit)
 
-	rows, err := r.sql.QueryContext(ctx, query, pq.Array(options.Platforms), options.AfterID, options.Limit)
+	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
