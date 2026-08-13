@@ -1120,9 +1120,17 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	}
 
 	// 终态收口：强制统一 OAuth 出站身份（User-Agent / originator / version 同源自洽）。
-	// 客户端自报身份不参与构造，浏览器型 UA 也因此不会再到达上游（原浏览器 UA 兜底已被吸收）。
+	// 无账号自定义 UA 且未 ForceCodexCLI 时，用客户端 UA 作为身份候选（直接透传形状）。
 	if account.Type == AccountTypeOAuth {
-		enforceCodexIdentityHeadersWithUA(req.Header, s.codexIdentityOverrideUA(account))
+		enforceCodexIdentityHeadersWithUA(req.Header, s.codexIdentityOverrideUAFromRequest(c, account))
+	}
+
+	// API Key：客户端 User-Agent 直接透传（账号自定义 / ForceCodexCLI 优先）。
+	if account.Type != AccountTypeOAuth &&
+		strings.TrimSpace(customUA) == "" &&
+		(s.cfg == nil || !s.cfg.Gateway.ForceCodexCLI) &&
+		c != nil && c.Request != nil {
+		applyClientUserAgentPassthrough(req.Header, c.Request.Header, false)
 	}
 
 	// Ensure required headers exist
@@ -1146,4 +1154,16 @@ func (s *OpenAIGatewayService) codexIdentityOverrideUA(account *Account) string 
 		return ""
 	}
 	return account.GetOpenAIUserAgent()
+}
+
+// codexIdentityOverrideUAFromRequest 在账号未配置自定义 UA 时回落为客户端入站 User-Agent，
+// 使 OAuth 出站可直接透传客户端 UA 形状（版本段仍由 enforce 同源重建）。
+func (s *OpenAIGatewayService) codexIdentityOverrideUAFromRequest(c *gin.Context, account *Account) string {
+	if override := s.codexIdentityOverrideUA(account); strings.TrimSpace(override) != "" {
+		return override
+	}
+	if c == nil || c.Request == nil {
+		return ""
+	}
+	return strings.TrimSpace(c.GetHeader("User-Agent"))
 }

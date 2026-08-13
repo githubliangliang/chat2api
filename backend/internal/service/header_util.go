@@ -90,6 +90,25 @@ func resolveWireCasing(key string) string {
 	return key
 }
 
+// applyClientUserAgentPassthrough copies the client's User-Agent onto the outbound
+// request when present. Call after fingerprint/default injection so the client value
+// wins; call before account header overrides so admin config still has final say.
+// wire=true stores the Anthropic wire casing ("User-Agent"); wire=false uses Header.Set.
+func applyClientUserAgentPassthrough(dst http.Header, client http.Header, wire bool) {
+	if dst == nil || client == nil {
+		return
+	}
+	ua := strings.TrimSpace(client.Get("User-Agent"))
+	if ua == "" {
+		return
+	}
+	if wire {
+		setHeaderRaw(dst, resolveWireCasing("user-agent"), ua)
+		return
+	}
+	dst.Set("User-Agent", ua)
+}
+
 // setHeaderRaw sets a header bypassing Go's canonical-case normalization.
 // The key is stored exactly as provided, preserving original casing.
 //

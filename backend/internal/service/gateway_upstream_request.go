@@ -184,6 +184,12 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 		}
 	}
 
+	// 客户端 User-Agent 直接透传：指纹统一 / OAuth 默认头可能覆盖了入站 UA。
+	// OAuth mimic 路径需要强制 Claude Code 身份，不透传第三方 UA。
+	if !(tokenType == "oauth" && mimicClaudeCode) {
+		applyClientUserAgentPassthrough(req.Header, clientHeaders, true)
+	}
+
 	// 账号级请求头覆写（仅 anthropic/openai api_key 账号启用时生效；OAuth 路径 no-op）。
 	// 放在所有 header 逻辑之后，确保配置值对同名头拥有最终决定权。
 	account.ApplyHeaderOverrides(req.Header)

@@ -367,6 +367,11 @@ func (s *GatewayService) buildUpstreamRequestAnthropicAPIKeyPassthrough(
 		setHeaderRaw(req.Header, "anthropic-version", "2023-06-01")
 	}
 
+	// 客户端 User-Agent 直接透传（白名单已写入；此处再确认一次，避免后续逻辑遗漏）。
+	if c != nil && c.Request != nil {
+		applyClientUserAgentPassthrough(req.Header, c.Request.Header, true)
+	}
+
 	// 账号级请求头覆写（最终生效，覆盖上面所有来源的同名头）
 	account.ApplyHeaderOverrides(req.Header)
 
