@@ -96,7 +96,7 @@ func (r *batchImageRepository) ListBatchImageJobsForOwner(ctx context.Context, u
 		args = append(args, filter.Status)
 	}
 	if filter.TaskNameLike != "" {
-		query += " AND task_name ILIKE $" + strconv.Itoa(len(args)+1)
+		query += " AND task_name LIKE $" + strconv.Itoa(len(args)+1) + " COLLATE NOCASE"
 		args = append(args, "%"+filter.TaskNameLike+"%")
 	}
 	if filter.Downloaded != nil {

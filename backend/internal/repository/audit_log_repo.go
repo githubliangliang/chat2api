@@ -183,7 +183,7 @@ func buildAuditLogsWhere(filter *service.AuditLogFilter) (string, []any) {
 	}
 	if v := strings.TrimSpace(filter.ActorEmail); v != "" {
 		args = append(args, "%"+escapeLikePattern(v)+"%")
-		clauses = append(clauses, "l.actor_email ILIKE $"+itoa(len(args)))
+		clauses = append(clauses, "l.actor_email LIKE $"+itoa(len(args))+" COLLATE NOCASE")
 	}
 	if v := strings.TrimSpace(filter.AuthMethod); v != "" {
 		args = append(args, v)
@@ -191,7 +191,7 @@ func buildAuditLogsWhere(filter *service.AuditLogFilter) (string, []any) {
 	}
 	if v := strings.TrimSpace(filter.Action); v != "" {
 		args = append(args, "%"+escapeLikePattern(v)+"%")
-		clauses = append(clauses, "l.action ILIKE $"+itoa(len(args)))
+		clauses = append(clauses, "l.action LIKE $"+itoa(len(args))+" COLLATE NOCASE")
 	}
 	if v := strings.TrimSpace(filter.Method); v != "" {
 		args = append(args, strings.ToUpper(v))
@@ -211,7 +211,7 @@ func buildAuditLogsWhere(filter *service.AuditLogFilter) (string, []any) {
 	if v := strings.TrimSpace(filter.Query); v != "" {
 		args = append(args, "%"+escapeLikePattern(v)+"%")
 		idx := itoa(len(args))
-		clauses = append(clauses, "(l.path ILIKE $"+idx+" OR l.action ILIKE $"+idx+" OR l.actor_email ILIKE $"+idx+")")
+		clauses = append(clauses, "(l.path LIKE $"+idx+" COLLATE NOCASE OR l.action LIKE $"+idx+" COLLATE NOCASE OR l.actor_email LIKE $"+idx+" COLLATE NOCASE)")
 	}
 
 	return "WHERE " + strings.Join(clauses, " AND "), args
@@ -410,7 +410,6 @@ func truncateString(s string, max int) string {
 	}
 	return string(runes)
 }
-
 
 func parseFlexibleTime(v any) time.Time {
 	switch t := v.(type) {

@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -156,6 +157,10 @@ func openSQLiteDriver(cfg *config.Config) (*entsql.Driver, error) {
 // prepareSchema applies SQL migrations (SQLite dialect under migrations/*.sql).
 // Both PostgreSQL and SQLite use the embedded migration files as the schema source.
 func prepareSchema(ctx context.Context, drv *entsql.Driver, cfg *config.Config) error {
+	return prepareSchemaWithFS(ctx, drv, cfg, migrations.FS)
+}
+
+func prepareSchemaWithFS(ctx context.Context, drv *entsql.Driver, cfg *config.Config, migrationsFS fs.FS) error {
 	if cfg.Database.IsSQLite() {
 		// Personal SQLite DBs may have been bootstrapped by Ent Schema.Create
 		// without schema_migrations. Always patch critical usage/billing objects,
@@ -163,13 +168,7 @@ func prepareSchema(ctx context.Context, drv *entsql.Driver, cfg *config.Config) 
 		if err := EnsureSQLiteAuxTables(ctx, drv.DB()); err != nil {
 			return fmt.Errorf("sqlite aux tables: %w", err)
 		}
-		if err := applyMigrationsFS(ctx, drv.DB(), migrations.FS); err != nil {
-			// If core app tables already exist, prefer staying up with aux patches
-			// rather than crash-looping on a historical migration edge case.
-			if sqliteHasCoreTables(ctx, drv.DB()) {
-				logger.LegacyPrintf("repository", "sqlite migrations incomplete (%v); continuing with existing schema", err)
-				return nil
-			}
+		if err := applyMigrationsFS(ctx, drv.DB(), migrationsFS); err != nil {
 			return err
 		}
 		// Re-run aux after migrations so newly created tables get indexes/stubs.
@@ -179,19 +178,8 @@ func prepareSchema(ctx context.Context, drv *entsql.Driver, cfg *config.Config) 
 		return nil
 	}
 
-	if err := applyMigrationsFS(ctx, drv.DB(), migrations.FS); err != nil {
+	if err := applyMigrationsFS(ctx, drv.DB(), migrationsFS); err != nil {
 		return err
 	}
 	return nil
-}
-
-func sqliteHasCoreTables(ctx context.Context, db *sql.DB) bool {
-	if db == nil {
-		return false
-	}
-	var n int
-	err := db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('users','usage_logs','api_keys')`,
-	).Scan(&n)
-	return err == nil && n >= 3
 }

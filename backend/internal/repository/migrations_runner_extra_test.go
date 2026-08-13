@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"io/fs"
@@ -11,14 +12,39 @@ import (
 	"testing/fstest"
 	"time"
 
+	"entgo.io/ent/dialect"
+	entsql "entgo.io/ent/dialect/sql"
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
+	_ "modernc.org/sqlite"
 )
 
 func TestApplyMigrations_NilDB(t *testing.T) {
 	err := ApplyMigrations(context.Background(), nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "nil sql db")
+}
+
+func TestPrepareSchemaDoesNotSuppressSQLiteMigrationErrors(t *testing.T) {
+	// This characterization test protects the startup contract: an invalid
+	// migration must fail even when a partially initialized database has core tables.
+	db, err := sql.Open("sqlite", "file:prepare_schema_error?mode=memory&cache=shared")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	_, err = db.Exec(`CREATE TABLE users (id INTEGER PRIMARY KEY); CREATE TABLE accounts (id INTEGER PRIMARY KEY); CREATE TABLE api_keys (id INTEGER PRIMARY KEY)`)
+	require.NoError(t, err)
+
+	drv := entsql.OpenDB(dialect.SQLite, db)
+	t.Cleanup(func() { _ = drv.Close() })
+	cfg := &config.Config{}
+	cfg.Database.Driver = config.DatabaseDriverSQLite
+
+	err = prepareSchemaWithFS(context.Background(), drv, cfg, fstest.MapFS{
+		"001_invalid.sql": &fstest.MapFile{Data: []byte("THIS IS NOT SQLITE;")},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "001_invalid.sql")
 }
 
 func TestApplyMigrations_DelegatesToApplyMigrationsFS(t *testing.T) {

@@ -16,7 +16,6 @@ import (
 	_ "github.com/Wei-Shaw/sub2api/ent/runtime"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/repository"
-	"github.com/lib/pq"
 )
 
 const classifierVersion = "ingress-reject-v1"
@@ -130,8 +129,15 @@ func cleanup(ctx context.Context, db *sql.DB, before time.Time, batchSize int, e
 			}
 		}
 		if execute && len(ids) > 0 {
+			placeholders := make([]string, len(ids))
+			args := make([]any, 0, len(ids)+1)
+			for i, id := range ids {
+				placeholders[i] = fmt.Sprintf("$%d", i+1)
+				args = append(args, id)
+			}
+			args = append(args, before)
 			result, err := db.ExecContext(ctx,
-				`DELETE FROM ops_error_logs WHERE id = ANY($1) AND created_at < $2`, pq.Array(ids), before)
+				fmt.Sprintf("DELETE FROM ops_error_logs WHERE id IN (%s) AND created_at < $%d", strings.Join(placeholders, ", "), len(args)), args...)
 			if err != nil {
 				return nil, scanned, matched, deleted, err
 			}

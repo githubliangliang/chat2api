@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
-	"github.com/lib/pq"
 )
 
 type opsRepository struct {
@@ -645,22 +644,10 @@ func (r *opsRepository) BatchInsertSystemLogs(ctx context.Context, inputs []*ser
 	if err != nil {
 		return 0, err
 	}
-	stmt, err := tx.PrepareContext(ctx, pq.CopyIn(
-		"ops_system_logs",
-		"created_at",
-		"host",
-		"level",
-		"component",
-		"message",
-		"request_id",
-		"client_request_id",
-		"user_id",
-		"api_key_id",
-		"account_id",
-		"platform",
-		"model",
-		"extra",
-	))
+	stmt, err := tx.PrepareContext(ctx, `INSERT INTO ops_system_logs (
+		created_at, host, level, component, message, request_id,
+		client_request_id, user_id, api_key_id, account_id, platform, model, extra
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		_ = tx.Rollback()
 		return 0, err
@@ -711,11 +698,6 @@ func (r *opsRepository) BatchInsertSystemLogs(ctx context.Context, inputs []*ser
 		inserted++
 	}
 
-	if _, err := stmt.ExecContext(ctx); err != nil {
-		_ = stmt.Close()
-		_ = tx.Rollback()
-		return inserted, err
-	}
 	if err := stmt.Close(); err != nil {
 		_ = tx.Rollback()
 		return inserted, err
@@ -770,7 +752,7 @@ SELECT
   l.account_id,
   COALESCE(l.platform, ''),
   COALESCE(l.model, ''),
-  COALESCE(l.extra::text, '{}')
+  COALESCE(l.extra, '{}')
 FROM ops_system_logs l
 ` + where + `
 ORDER BY l.created_at DESC, l.id DESC
@@ -977,13 +959,15 @@ func buildOpsErrorLogsWhere(filter *service.OpsErrorLogFilter) (string, []any) {
 		clauses = append(clauses, "COALESCE(e.is_business_limited,false) = false")
 	}
 	if len(filter.StatusCodes) > 0 {
-		args = append(args, pq.Array(filter.StatusCodes))
-		clauses = append(clauses, "COALESCE(e.upstream_status_code, e.status_code, 0) = ANY($"+itoa(len(args))+")")
+		clause, inArgs := sqlSliceIn("COALESCE(e.upstream_status_code, e.status_code, 0)", filter.StatusCodes, len(args)+1)
+		args = append(args, inArgs...)
+		clauses = append(clauses, clause)
 	} else if filter.StatusCodesOther {
 		// "Other" means: status codes not in the common list.
 		known := []int{400, 401, 403, 404, 409, 422, 429, 500, 502, 503, 504, 529}
-		args = append(args, pq.Array(known))
-		clauses = append(clauses, "NOT (COALESCE(e.upstream_status_code, e.status_code, 0) = ANY($"+itoa(len(args))+"))")
+		clause, inArgs := sqlSliceIn("COALESCE(e.upstream_status_code, e.status_code, 0)", known, len(args)+1)
+		args = append(args, inArgs...)
+		clauses = append(clauses, "NOT ("+clause+")")
 	}
 	// Exact correlation keys (preferred for request↔upstream linkage).
 	if rid := strings.TrimSpace(filter.RequestID); rid != "" {
@@ -999,14 +983,14 @@ func buildOpsErrorLogsWhere(filter *service.OpsErrorLogFilter) (string, []any) {
 		like := "%" + q + "%"
 		args = append(args, like)
 		n := itoa(len(args))
-		clauses = append(clauses, "(e.request_id ILIKE $"+n+" OR e.client_request_id ILIKE $"+n+" OR e.error_message ILIKE $"+n+")")
+		clauses = append(clauses, "(e.request_id LIKE $"+n+" COLLATE NOCASE OR e.client_request_id LIKE $"+n+" COLLATE NOCASE OR e.error_message LIKE $"+n+" COLLATE NOCASE)")
 	}
 
 	if userQuery := strings.TrimSpace(filter.UserQuery); userQuery != "" {
 		like := "%" + userQuery + "%"
 		args = append(args, like)
 		n := itoa(len(args))
-		clauses = append(clauses, "EXISTS (SELECT 1 FROM users u WHERE u.id = e.user_id AND u.email ILIKE $"+n+")")
+		clauses = append(clauses, "EXISTS (SELECT 1 FROM users u WHERE u.id = e.user_id AND u.email LIKE $"+n+" COLLATE NOCASE)")
 	}
 
 	if filter.UserID != nil && *filter.UserID > 0 {
@@ -1021,7 +1005,7 @@ func buildOpsErrorLogsWhere(filter *service.OpsErrorLogFilter) (string, []any) {
 	if m := strings.TrimSpace(filter.Model); m != "" {
 		if filter.ModelFuzzy {
 			args = append(args, "%"+escapeLikePattern(m)+"%")
-			clauses = append(clauses, "COALESCE(e.requested_model, e.model, '') ILIKE $"+itoa(len(args)))
+			clauses = append(clauses, "COALESCE(e.requested_model, e.model, '') LIKE $"+itoa(len(args))+" COLLATE NOCASE")
 		} else {
 			args = append(args, m)
 			clauses = append(clauses, "COALESCE(e.requested_model, e.model, '') = $"+itoa(len(args)))
@@ -1036,8 +1020,9 @@ func buildOpsErrorLogsWhere(filter *service.OpsErrorLogFilter) (string, []any) {
 		clauses = append(clauses, clause)
 	}
 	if len(filter.ErrorTypesAny) > 0 {
-		args = append(args, pq.Array(filter.ErrorTypesAny))
-		clauses = append(clauses, "e.error_type = ANY($"+itoa(len(args))+")")
+		clause, inArgs := sqlSliceIn("e.error_type", filter.ErrorTypesAny, len(args)+1)
+		args = append(args, inArgs...)
+		clauses = append(clauses, clause)
 	}
 
 	return "WHERE " + strings.Join(clauses, " AND "), args
@@ -1136,7 +1121,7 @@ func buildOpsSystemLogsWhere(filter *service.OpsSystemLogFilter) (string, []any,
 			like := "%" + v + "%"
 			args = append(args, like)
 			n := itoa(len(args))
-			clauses = append(clauses, "(l.message ILIKE $"+n+" OR COALESCE(l.request_id,'') ILIKE $"+n+" OR COALESCE(l.client_request_id,'') ILIKE $"+n+" OR COALESCE(l.extra::text,'') ILIKE $"+n+")")
+			clauses = append(clauses, "(l.message LIKE $"+n+" COLLATE NOCASE OR COALESCE(l.request_id,'') LIKE $"+n+" COLLATE NOCASE OR COALESCE(l.client_request_id,'') LIKE $"+n+" COLLATE NOCASE OR COALESCE(l.extra,'') LIKE $"+n+" COLLATE NOCASE)")
 			hasConstraint = true
 		}
 	}

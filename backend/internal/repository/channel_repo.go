@@ -9,7 +9,6 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
-	"github.com/lib/pq"
 )
 
 type channelRepository struct {
@@ -193,7 +192,7 @@ func (r *channelRepository) List(ctx context.Context, params pagination.Paginati
 		argIdx++
 	}
 	if search != "" {
-		where = append(where, fmt.Sprintf("(c.name ILIKE $%d OR c.description ILIKE $%d)", argIdx, argIdx))
+		where = append(where, fmt.Sprintf("(c.name LIKE $%d COLLATE NOCASE OR c.description LIKE $%d COLLATE NOCASE)", argIdx, argIdx))
 		args = append(args, "%"+escapeLike(search)+"%")
 		argIdx++
 	}
@@ -367,11 +366,9 @@ func (r *channelRepository) ListAll(ctx context.Context) ([]service.Channel, err
 
 // batchLoadGroupIDs 批量加载多个渠道的分组 ID
 func (r *channelRepository) batchLoadGroupIDs(ctx context.Context, channelIDs []int64) (map[int64][]int64, error) {
+	clause, args := sqlInt64In("channel_id", channelIDs, 1)
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT channel_id, group_id FROM channel_groups
-		 WHERE channel_id = ANY($1) ORDER BY channel_id, group_id`,
-		pq.Array(channelIDs),
-	)
+		fmt.Sprintf(`SELECT channel_id, group_id FROM channel_groups WHERE %s ORDER BY channel_id, group_id`, clause), args...)
 	if err != nil {
 		return nil, fmt.Errorf("batch load group ids: %w", err)
 	}
@@ -451,10 +448,10 @@ func (r *channelRepository) GetGroupsInOtherChannels(ctx context.Context, channe
 	if len(groupIDs) == 0 {
 		return nil, nil
 	}
+	clause, args := sqlInt64In("group_id", groupIDs, 1)
+	args = append(args, channelID)
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT group_id FROM channel_groups WHERE group_id = ANY($1) AND channel_id != $2`,
-		pq.Array(groupIDs), channelID,
-	)
+		fmt.Sprintf(`SELECT group_id FROM channel_groups WHERE %s AND channel_id != $%d`, clause, len(args)), args...)
 	if err != nil {
 		return nil, fmt.Errorf("get groups in other channels: %w", err)
 	}
@@ -526,10 +523,9 @@ func (r *channelRepository) GetGroupPlatforms(ctx context.Context, groupIDs []in
 	if len(groupIDs) == 0 {
 		return make(map[int64]string), nil
 	}
+	clause, args := sqlInt64In("id", groupIDs, 1)
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, platform FROM groups WHERE id = ANY($1)`,
-		pq.Array(groupIDs),
-	)
+		fmt.Sprintf(`SELECT id, platform FROM groups WHERE %s`, clause), args...)
 	if err != nil {
 		return nil, fmt.Errorf("get group platforms: %w", err)
 	}

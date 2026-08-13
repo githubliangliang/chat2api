@@ -27,7 +27,7 @@ func TestBuildOpsErrorLogsWhere_UserScopedFilters(t *testing.T) {
 		"COALESCE(e.requested_model, e.model, '') = $",
 		"COALESCE(e.is_count_tokens, false) = false",
 		"e.error_phase IN ($",
-		"e.error_type = ANY($",
+		"e.error_type IN ($",
 	} {
 		if !strings.Contains(where, want) {
 			t.Fatalf("where missing %q\nfull: %s", want, where)
@@ -46,11 +46,11 @@ func TestBuildOpsErrorLogsWhere_ModelFuzzy(t *testing.T) {
 		t.Fatalf("default should be exact match, got: %s", whereExact)
 	}
 
-	// ModelFuzzy=true → ILIKE
+	// ModelFuzzy=true → case-insensitive SQLite LIKE
 	fuzzy := &service.OpsErrorLogFilter{Model: "claude", ModelFuzzy: true}
 	whereFuzzy, args := buildOpsErrorLogsWhere(fuzzy)
-	if !strings.Contains(whereFuzzy, "COALESCE(e.requested_model, e.model, '') ILIKE $") {
-		t.Fatalf("ModelFuzzy should use ILIKE, got: %s", whereFuzzy)
+	if !strings.Contains(whereFuzzy, "COALESCE(e.requested_model, e.model, '') LIKE $") || !strings.Contains(whereFuzzy, "COLLATE NOCASE") {
+		t.Fatalf("ModelFuzzy should use SQLite case-insensitive LIKE, got: %s", whereFuzzy)
 	}
 	if len(args) != 1 || args[0] != "%claude%" {
 		t.Fatalf("expected arg \"%%claude%%\", got %v", args)

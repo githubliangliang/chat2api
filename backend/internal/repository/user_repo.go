@@ -5,10 +5,13 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
 
+	"entgo.io/ent/dialect"
+	entsql "entgo.io/ent/dialect/sql"
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/apikey"
 	"github.com/Wei-Shaw/sub2api/ent/authidentity"
@@ -22,10 +25,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
-	"github.com/lib/pq"
-
-	"entgo.io/ent/dialect"
-	entsql "entgo.io/ent/dialect/sql"
 )
 
 type userRepository struct {
@@ -782,7 +781,7 @@ func (r *userRepository) filterUsersByAttributes(ctx context.Context, attrs map[
 	args := make([]any, 0, len(attrs)*2+1)
 	argIndex := 1
 	for attrID, value := range attrs {
-		clauses = append(clauses, fmt.Sprintf("(attribute_id = $%d AND value ILIKE $%d)", argIndex, argIndex+1))
+		clauses = append(clauses, fmt.Sprintf("(attribute_id = $%d AND value LIKE $%d COLLATE NOCASE)", argIndex, argIndex+1))
 		args = append(args, attrID, "%"+value+"%")
 		argIndex += 2
 	}
@@ -891,6 +890,38 @@ func (r *userRepository) DeductBalance(ctx context.Context, id int64, amount flo
 func (r *userRepository) DeductAvailableBalance(ctx context.Context, id int64, amount float64) (deducted float64, err error) {
 	if amount < 0 {
 		return 0, fmt.Errorf("deduction amount must be nonnegative")
+	}
+	if r.client != nil && r.client.Driver().Dialect() == dialect.SQLite {
+		db, ok := r.sql.(*sql.DB)
+		if !ok {
+			return 0, fmt.Errorf("sqlite balance update requires sql db")
+		}
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			return 0, err
+		}
+		defer func() {
+			if err != nil {
+				_ = tx.Rollback()
+			}
+		}()
+		var balance float64
+		if err = scanSingleRow(ctx, tx, `SELECT balance FROM users WHERE id = $1 AND deleted_at IS NULL`, []any{id}, &balance); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return 0, service.ErrUserNotFound
+			}
+			return 0, err
+		}
+		deducted = math.Min(amount, math.Max(balance, 0))
+		if deducted > 0 {
+			if _, err = tx.ExecContext(ctx, `UPDATE users SET balance = balance - $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND deleted_at IS NULL`, deducted, id); err != nil {
+				return 0, err
+			}
+		}
+		if err = tx.Commit(); err != nil {
+			return 0, err
+		}
+		return deducted, nil
 	}
 	const updateSQL = `
 		WITH target AS (
@@ -1061,7 +1092,7 @@ func (r *userRepository) UpdateConcurrency(ctx context.Context, id int64, amount
 func (r *userRepository) ApplyRedeemConcurrencyAdjustment(ctx context.Context, id int64, delta int) error {
 	const updateSQL = `
 		UPDATE users
-		SET concurrency = GREATEST(concurrency + $1, 0), updated_at = NOW()
+		SET concurrency = GREATEST(concurrency + $1, 0), updated_at = CURRENT_TIMESTAMP
 		WHERE id = $2 AND deleted_at IS NULL
 	`
 	client := clientFromContext(ctx, r.client)
@@ -1086,9 +1117,11 @@ func (r *userRepository) BatchSetConcurrency(ctx context.Context, userIDs []int6
 	if value < 0 {
 		value = 0
 	}
+	idClause, idArgs := sqlInt64In("id", userIDs, 2)
+	args := append([]any{value}, idArgs...)
 	res, err := r.sql.ExecContext(ctx,
-		"UPDATE users SET concurrency = $1, updated_at = NOW() WHERE id = ANY($2) AND deleted_at IS NULL",
-		value, pq.Array(userIDs))
+		fmt.Sprintf("UPDATE users SET concurrency = $1, updated_at = CURRENT_TIMESTAMP WHERE %s AND deleted_at IS NULL", idClause),
+		args...)
 	if err != nil {
 		return 0, fmt.Errorf("batch set concurrency: %w", err)
 	}
@@ -1100,9 +1133,11 @@ func (r *userRepository) BatchAddConcurrency(ctx context.Context, userIDs []int6
 	if len(userIDs) == 0 {
 		return 0, nil
 	}
+	idClause, idArgs := sqlInt64In("id", userIDs, 2)
+	args := append([]any{delta}, idArgs...)
 	res, err := r.sql.ExecContext(ctx,
-		"UPDATE users SET concurrency = GREATEST(concurrency + $1, 0), updated_at = NOW() WHERE id = ANY($2) AND deleted_at IS NULL",
-		delta, pq.Array(userIDs))
+		fmt.Sprintf("UPDATE users SET concurrency = CASE WHEN concurrency + $1 < 0 THEN 0 ELSE concurrency + $1 END, updated_at = CURRENT_TIMESTAMP WHERE %s AND deleted_at IS NULL", idClause),
+		args...)
 	if err != nil {
 		return 0, fmt.Errorf("batch add concurrency: %w", err)
 	}
@@ -1127,13 +1162,14 @@ func (r *userRepository) BatchUpdateLimits(ctx context.Context, userIDs []int64,
 		args = append(args, value)
 		setClauses = append(setClauses, fmt.Sprintf("rpm_limit = $%d", len(args)))
 	}
-	setClauses = append(setClauses, "updated_at = NOW()")
-	args = append(args, pq.Array(userIDs))
+	setClauses = append(setClauses, "updated_at = CURRENT_TIMESTAMP")
+	idClause, idArgs := sqlInt64In("id", userIDs, len(args)+1)
+	args = append(args, idArgs...)
 
 	query := fmt.Sprintf(
-		"UPDATE users SET %s WHERE id = ANY($%d) AND deleted_at IS NULL",
+		"UPDATE users SET %s WHERE %s AND deleted_at IS NULL",
 		strings.Join(setClauses, ", "),
-		len(args),
+		idClause,
 	)
 	res, err := r.sql.ExecContext(ctx, query, args...)
 	if err != nil {
