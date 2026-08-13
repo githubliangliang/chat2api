@@ -8,10 +8,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
-
-	"github.com/lib/pq"
 )
 
 type EventFilter struct {
@@ -127,7 +126,8 @@ func (r *PostgreSQLRepository) DeleteEventsByIDs(ctx context.Context, ids []int6
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	rows, err := tx.QueryContext(ctx, `DELETE FROM prompt_audit_events WHERE id=ANY($1) RETURNING job_id`, pq.Array(ids))
+	clause, args := sqliteInt64In("id", ids, 1)
+	rows, err := tx.QueryContext(ctx, `DELETE FROM prompt_audit_events WHERE `+clause+` RETURNING job_id`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -187,13 +187,32 @@ func (r *PostgreSQLRepository) DeleteEventsByFilter(ctx context.Context, filter 
 		maxIndex := len(args) + 1
 		limitIndex := maxIndex + 1
 		args = append(args, snapshotMaxID, batchSize)
-		rows, err := tx.QueryContext(ctx, `
-			WITH selected AS (
-				SELECT e.id FROM prompt_audit_events e`+where+
-			fmt.Sprintf(` AND e.id <= $%d ORDER BY e.id LIMIT $%d FOR UPDATE SKIP LOCKED`, maxIndex, limitIndex)+`
-			), deleted AS (
-				DELETE FROM prompt_audit_events e USING selected s WHERE e.id=s.id RETURNING e.job_id
-			) SELECT job_id FROM deleted`, args...)
+		selectedRows, err := tx.QueryContext(ctx, `SELECT e.id FROM prompt_audit_events e`+where+
+			fmt.Sprintf(` AND e.id <= $%d ORDER BY e.id LIMIT $%d`, maxIndex, limitIndex), args...)
+		if err != nil {
+			_ = tx.Rollback()
+			return nil, err
+		}
+		selectedIDs := make([]int64, 0, batchSize)
+		for selectedRows.Next() {
+			var id int64
+			if err := selectedRows.Scan(&id); err != nil {
+				_ = selectedRows.Close()
+				_ = tx.Rollback()
+				return nil, err
+			}
+			selectedIDs = append(selectedIDs, id)
+		}
+		if err := selectedRows.Close(); err != nil {
+			_ = tx.Rollback()
+			return nil, err
+		}
+		if len(selectedIDs) == 0 {
+			_ = tx.Rollback()
+			break
+		}
+		deleteClause, deleteArgs := sqliteInt64In("id", selectedIDs, 1)
+		rows, err := tx.QueryContext(ctx, `DELETE FROM prompt_audit_events WHERE `+deleteClause+` RETURNING job_id`, deleteArgs...)
 		if err != nil {
 			_ = tx.Rollback()
 			return nil, err
@@ -377,11 +396,22 @@ func deleteOrphanJobs(ctx context.Context, tx *sql.Tx, jobIDs []int64) (int64, e
 	if len(jobIDs) == 0 {
 		return 0, nil
 	}
-	result, err := tx.ExecContext(ctx, `DELETE FROM prompt_audit_jobs j
-		WHERE j.id=ANY($1) AND j.status <> 'processing'
-		AND NOT EXISTS (SELECT 1 FROM prompt_audit_events e WHERE e.job_id=j.id)`, pq.Array(jobIDs))
+	clause, args := sqliteInt64In("id", jobIDs, 1)
+	result, err := tx.ExecContext(ctx, `DELETE FROM prompt_audit_jobs
+		WHERE `+clause+` AND status <> 'processing'
+		AND NOT EXISTS (SELECT 1 FROM prompt_audit_events e WHERE e.job_id=prompt_audit_jobs.id)`, args...)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+func sqliteInt64In(column string, ids []int64, start int) (string, []any) {
+	placeholders := make([]string, len(ids))
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "$" + strconv.Itoa(start+i)
+		args[i] = id
+	}
+	return column + " IN (" + strings.Join(placeholders, ",") + ")", args
 }
