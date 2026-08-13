@@ -38,12 +38,17 @@ redis:
   pool_size: 8
   min_idle_conns: 0
 
-# 关掉运维监控后台任务（定时采集/聚合/告警，省 CPU/内存）
+# 运维：API 与错误/系统日志可用；聚合/采集缓存仍关以省资源
+# 定时清理默认开：系统日志与错误日志共用 error_log_retention_days
 ops:
   enabled: true
   use_preaggregated_tables: false
   cleanup:
-    enabled: false
+    enabled: true
+    schedule: "0 3 * * *"              # 每天 03:00（时区见下方 timezone）
+    error_log_retention_days: 7        # 错误日志 + 系统日志保留天数；0=每次清空
+    minute_metrics_retention_days: 3
+    hourly_metrics_retention_days: 14
   aggregation:
     enabled: false
   metrics_collector_cache:
