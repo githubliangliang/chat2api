@@ -1,11 +1,14 @@
 package repository
 
 import (
-	"bufio"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -48,31 +51,31 @@ func TestProductionSQLUsesSQLiteDialect(t *testing.T) {
 				return nil
 			}
 
-			file, err := os.Open(path)
+			fset := token.NewFileSet()
+			file, err := parser.ParseFile(fset, path, nil, 0)
 			if err != nil {
 				return err
 			}
-			defer func() { _ = file.Close() }()
-
-			scanner := bufio.NewScanner(file)
-			for lineNumber := 1; scanner.Scan(); lineNumber++ {
-				line := scanner.Text()
-				trimmed := strings.TrimSpace(line)
-				if strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "*") || strings.HasPrefix(trimmed, "/*") || strings.HasPrefix(trimmed, "import (") {
-					continue
+			ast.Inspect(file, func(node ast.Node) bool {
+				literal, ok := node.(*ast.BasicLit)
+				if !ok || literal.Kind != token.STRING {
+					return true
 				}
-				if !strings.Contains(line, "`") && !strings.Contains(line, "\"") {
-					continue
+				value, err := strconv.Unquote(literal.Value)
+				if err != nil {
+					return true
 				}
 				for _, pattern := range patterns {
-					if match := pattern.FindString(line); match != "" {
+					if match := pattern.FindString(value); match != "" {
 						rel, _ := filepath.Rel(backendRoot, path)
-						violations = append(violations, rel+":"+sqliteAuditItoa(lineNumber)+": "+match)
+						line := fset.Position(literal.Pos()).Line
+						violations = append(violations, rel+":"+sqliteAuditItoa(line)+": "+match)
 						break
 					}
 				}
-			}
-			return scanner.Err()
+				return true
+			})
+			return nil
 		})
 		require.NoError(t, err)
 	}
