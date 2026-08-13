@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
-	"github.com/lib/pq"
 )
 
 // auditLogRepository 审计日志仓储（raw SQL，append-only）。
@@ -66,53 +65,7 @@ func (r *auditLogRepository) BatchInsert(ctx context.Context, logs []*service.Au
 		return 0, nil
 	}
 
-	// SQLite / non-pq drivers: fall back to plain multi-row INSERT (no COPY protocol).
-	if !isPostgresDB(r.db) {
-		return r.batchInsertSQL(ctx, logs)
-	}
-
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, err
-	}
-	stmt, err := tx.PrepareContext(ctx, pq.CopyIn(
-		"audit_logs",
-		"created_at", "actor_user_id", "actor_email", "actor_role", "auth_method",
-		"credential_masked", "action", "method", "path", "request_id", "client_ip", "user_agent",
-		"request_body", "status_code", "latency_ms", "extra",
-	))
-	if err != nil {
-		_ = tx.Rollback()
-		// Driver rejected COPY (e.g. SQLite): fall back.
-		return r.batchInsertSQL(ctx, logs)
-	}
-
-	var inserted int64
-	for _, log := range logs {
-		if log == nil {
-			continue
-		}
-		if _, err := stmt.ExecContext(ctx, auditLogInsertValues(log)...); err != nil {
-			_ = stmt.Close()
-			_ = tx.Rollback()
-			return inserted, err
-		}
-		inserted++
-	}
-
-	if _, err := stmt.ExecContext(ctx); err != nil {
-		_ = stmt.Close()
-		_ = tx.Rollback()
-		return inserted, err
-	}
-	if err := stmt.Close(); err != nil {
-		_ = tx.Rollback()
-		return inserted, err
-	}
-	if err := tx.Commit(); err != nil {
-		return inserted, err
-	}
-	return inserted, nil
+	return r.batchInsertSQL(ctx, logs)
 }
 
 func (r *auditLogRepository) Insert(ctx context.Context, log *service.AuditLog) error {
@@ -151,17 +104,6 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`
 		return inserted, err
 	}
 	return inserted, nil
-}
-
-func isPostgresDB(db *sql.DB) bool {
-	if db == nil {
-		return false
-	}
-	// Prefer existing helper when available.
-	if isPostgresDriver(db) {
-		return true
-	}
-	return false
 }
 
 func buildAuditLogsWhere(filter *service.AuditLogFilter) (string, []any) {

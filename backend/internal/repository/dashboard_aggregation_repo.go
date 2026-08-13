@@ -4,13 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
-	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/Wei-Shaw/sub2api/internal/service"
-	"github.com/lib/pq"
 )
 
 type dashboardAggregationRepository struct {
@@ -25,23 +22,11 @@ func NewDashboardAggregationRepository(sqlDB *sql.DB) service.DashboardAggregati
 	if sqlDB == nil {
 		return nil
 	}
-	if !isPostgresDriver(sqlDB) {
-		log.Printf("[DashboardAggregation] 检测到非 PostgreSQL 驱动，已自动禁用预聚合")
-		return nil
-	}
 	return newDashboardAggregationRepositoryWithSQL(sqlDB)
 }
 
 func newDashboardAggregationRepositoryWithSQL(sqlq sqlExecutor) *dashboardAggregationRepository {
 	return &dashboardAggregationRepository{sql: sqlq}
-}
-
-func isPostgresDriver(db *sql.DB) bool {
-	if db == nil {
-		return false
-	}
-	_, ok := db.Driver().(*pq.Driver)
-	return ok
 }
 
 func (r *dashboardAggregationRepository) AggregateRange(ctx context.Context, start, end time.Time) error {
@@ -146,10 +131,10 @@ func (r *dashboardAggregationRepository) recomputeRangeInTx(ctx context.Context,
 	if _, err := r.sql.ExecContext(ctx, "DELETE FROM usage_dashboard_hourly_users WHERE bucket_start >= $1 AND bucket_start < $2", hourStart, hourEnd); err != nil {
 		return err
 	}
-	if _, err := r.sql.ExecContext(ctx, "DELETE FROM usage_dashboard_daily WHERE bucket_date >= $1::date AND bucket_date < $2::date", dayStart, dayEnd); err != nil {
+	if _, err := r.sql.ExecContext(ctx, "DELETE FROM usage_dashboard_daily WHERE bucket_date >= date($1) AND bucket_date < date($2)", dayStart, dayEnd); err != nil {
 		return err
 	}
-	if _, err := r.sql.ExecContext(ctx, "DELETE FROM usage_dashboard_daily_users WHERE bucket_date >= $1::date AND bucket_date < $2::date", dayStart, dayEnd); err != nil {
+	if _, err := r.sql.ExecContext(ctx, "DELETE FROM usage_dashboard_daily_users WHERE bucket_date >= date($1) AND bucket_date < date($2)", dayStart, dayEnd); err != nil {
 		return err
 	}
 
@@ -200,33 +185,26 @@ func (r *dashboardAggregationRepository) CleanupAggregates(ctx context.Context, 
 	if _, err := r.sql.ExecContext(ctx, "DELETE FROM usage_dashboard_hourly_users WHERE bucket_start < $1", hourlyCutoffUTC); err != nil {
 		return err
 	}
-	if _, err := r.sql.ExecContext(ctx, "DELETE FROM usage_dashboard_daily WHERE bucket_date < $1::date", dailyCutoffUTC); err != nil {
+	if _, err := r.sql.ExecContext(ctx, "DELETE FROM usage_dashboard_daily WHERE bucket_date < date($1)", dailyCutoffUTC); err != nil {
 		return err
 	}
-	if _, err := r.sql.ExecContext(ctx, "DELETE FROM usage_dashboard_daily_users WHERE bucket_date < $1::date", dailyCutoffUTC); err != nil {
+	if _, err := r.sql.ExecContext(ctx, "DELETE FROM usage_dashboard_daily_users WHERE bucket_date < date($1)", dailyCutoffUTC); err != nil {
 		return err
 	}
 	return nil
 }
 
 func (r *dashboardAggregationRepository) CleanupUsageLogs(ctx context.Context, cutoff time.Time) error {
-	isPartitioned, err := r.isUsageLogsPartitioned(ctx)
-	if err != nil {
-		return err
-	}
-	if isPartitioned {
-		return r.dropUsageLogsPartitions(ctx, cutoff)
-	}
 	for {
 		res, err := r.sql.ExecContext(ctx, `
 			WITH victims AS (
-				SELECT ctid
+				SELECT rowid
 				FROM usage_logs
 				WHERE created_at < $1
 				LIMIT $2
 			)
 			DELETE FROM usage_logs
-			WHERE ctid IN (SELECT ctid FROM victims)
+			WHERE rowid IN (SELECT rowid FROM victims)
 		`, cutoff.UTC(), usageLogsCleanupBatchSize)
 		if err != nil {
 			return err
@@ -242,27 +220,46 @@ func (r *dashboardAggregationRepository) CleanupUsageLogs(ctx context.Context, c
 }
 
 func (r *dashboardAggregationRepository) CleanupUsageBillingDedup(ctx context.Context, cutoff time.Time) error {
+	db, ok := r.sql.(*sql.DB)
+	if !ok {
+		return fmt.Errorf("usage billing dedup cleanup requires sql db")
+	}
 	for {
-		res, err := r.sql.ExecContext(ctx, `
-			WITH victims AS (
-				SELECT ctid, request_id, api_key_id, request_fingerprint, created_at
-				FROM usage_billing_dedup
-				WHERE created_at < $1
-				LIMIT $2
-			), archived AS (
-				INSERT INTO usage_billing_dedup_archive (request_id, api_key_id, request_fingerprint, created_at)
-				SELECT request_id, api_key_id, request_fingerprint, created_at
-				FROM victims
-				ON CONFLICT (request_id, api_key_id) DO NOTHING
-			)
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO usage_billing_dedup_archive (request_id, api_key_id, request_fingerprint, created_at)
+			SELECT request_id, api_key_id, request_fingerprint, created_at
+			FROM usage_billing_dedup
+			WHERE created_at < $1
+			ORDER BY rowid
+			LIMIT $2
+			ON CONFLICT (request_id, api_key_id) DO NOTHING
+		`, cutoff.UTC(), usageBillingDedupCleanupBatchSize); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		res, err := tx.ExecContext(ctx, `
 			DELETE FROM usage_billing_dedup
-			WHERE ctid IN (SELECT ctid FROM victims)
+			WHERE rowid IN (
+				SELECT rowid FROM usage_billing_dedup
+				WHERE created_at < $1
+				ORDER BY rowid
+				LIMIT $2
+			)
 		`, cutoff.UTC(), usageBillingDedupCleanupBatchSize)
 		if err != nil {
+			_ = tx.Rollback()
 			return err
 		}
 		affected, err := res.RowsAffected()
 		if err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err := tx.Commit(); err != nil {
 			return err
 		}
 		if affected < usageBillingDedupCleanupBatchSize {
@@ -272,58 +269,42 @@ func (r *dashboardAggregationRepository) CleanupUsageBillingDedup(ctx context.Co
 }
 
 func (r *dashboardAggregationRepository) EnsureUsageLogsPartitions(ctx context.Context, now time.Time) error {
-	isPartitioned, err := r.isUsageLogsPartitioned(ctx)
-	if err != nil || !isPartitioned {
-		return err
-	}
-	monthStart := truncateToMonthUTC(now)
-	prevMonth := monthStart.AddDate(0, -1, 0)
-	nextMonth := monthStart.AddDate(0, 1, 0)
-
-	for _, m := range []time.Time{prevMonth, monthStart, nextMonth} {
-		if err := r.createUsageLogsPartition(ctx, m); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
 func (r *dashboardAggregationRepository) insertHourlyActiveUsers(ctx context.Context, start, end time.Time) error {
-	tzName := timezone.Name()
 	query := `
 		INSERT INTO usage_dashboard_hourly_users (bucket_start, user_id)
 		SELECT DISTINCT
-			date_trunc('hour', created_at AT TIME ZONE $3) AT TIME ZONE $3 AS bucket_start,
+			datetime(strftime('%Y-%m-%d %H:00:00', created_at)) AS bucket_start,
 			user_id
 		FROM usage_logs
 		WHERE created_at >= $1 AND created_at < $2
 		ON CONFLICT DO NOTHING
 	`
-	_, err := r.sql.ExecContext(ctx, query, start, end, tzName)
+	_, err := r.sql.ExecContext(ctx, query, start, end)
 	return err
 }
 
 func (r *dashboardAggregationRepository) insertDailyActiveUsers(ctx context.Context, start, end time.Time) error {
-	tzName := timezone.Name()
 	query := `
 		INSERT INTO usage_dashboard_daily_users (bucket_date, user_id)
 		SELECT DISTINCT
-			(bucket_start AT TIME ZONE $3)::date AS bucket_date,
+			date(bucket_start) AS bucket_date,
 			user_id
 		FROM usage_dashboard_hourly_users
 		WHERE bucket_start >= $1 AND bucket_start < $2
 		ON CONFLICT DO NOTHING
 	`
-	_, err := r.sql.ExecContext(ctx, query, start, end, tzName)
+	_, err := r.sql.ExecContext(ctx, query, start, end)
 	return err
 }
 
 func (r *dashboardAggregationRepository) upsertHourlyAggregates(ctx context.Context, start, end time.Time) error {
-	tzName := timezone.Name()
 	query := `
 		WITH hourly AS (
 			SELECT
-				date_trunc('hour', created_at AT TIME ZONE $3) AT TIME ZONE $3 AS bucket_start,
+				datetime(strftime('%Y-%m-%d %H:00:00', created_at)) AS bucket_start,
 				COUNT(*) AS total_requests,
 				COALESCE(SUM(input_tokens), 0) AS input_tokens,
 				COALESCE(SUM(output_tokens), 0) AS output_tokens,
@@ -386,16 +367,15 @@ func (r *dashboardAggregationRepository) upsertHourlyAggregates(ctx context.Cont
 			active_users = EXCLUDED.active_users,
 			computed_at = EXCLUDED.computed_at
 	`
-	_, err := r.sql.ExecContext(ctx, query, start, end, tzName)
+	_, err := r.sql.ExecContext(ctx, query, start, end)
 	return err
 }
 
 func (r *dashboardAggregationRepository) upsertDailyAggregates(ctx context.Context, start, end time.Time) error {
-	tzName := timezone.Name()
 	query := `
 		WITH daily AS (
 			SELECT
-				(bucket_start AT TIME ZONE $5)::date AS bucket_date,
+				date(bucket_start) AS bucket_date,
 				COALESCE(SUM(total_requests), 0) AS total_requests,
 				COALESCE(SUM(input_tokens), 0) AS input_tokens,
 				COALESCE(SUM(output_tokens), 0) AS output_tokens,
@@ -407,12 +387,12 @@ func (r *dashboardAggregationRepository) upsertDailyAggregates(ctx context.Conte
 				COALESCE(SUM(total_duration_ms), 0) AS total_duration_ms
 			FROM usage_dashboard_hourly
 			WHERE bucket_start >= $1 AND bucket_start < $2
-			GROUP BY (bucket_start AT TIME ZONE $5)::date
+			GROUP BY date(bucket_start)
 		),
 		user_counts AS (
 			SELECT bucket_date, COUNT(*) AS active_users
 			FROM usage_dashboard_daily_users
-			WHERE bucket_date >= $3::date AND bucket_date < $4::date
+			WHERE bucket_date >= date($3) AND bucket_date < date($4)
 			GROUP BY bucket_date
 		)
 		INSERT INTO usage_dashboard_daily (
@@ -458,76 +438,7 @@ func (r *dashboardAggregationRepository) upsertDailyAggregates(ctx context.Conte
 			active_users = EXCLUDED.active_users,
 			computed_at = EXCLUDED.computed_at
 	`
-	_, err := r.sql.ExecContext(ctx, query, start, end, start, end, tzName)
-	return err
-}
-
-func (r *dashboardAggregationRepository) isUsageLogsPartitioned(ctx context.Context) (bool, error) {
-	query := `
-		SELECT EXISTS(
-			SELECT 1
-			FROM pg_partitioned_table pt
-			JOIN pg_class c ON c.oid = pt.partrelid
-			WHERE c.relname = 'usage_logs'
-		)
-	`
-	var partitioned bool
-	if err := scanSingleRow(ctx, r.sql, query, nil, &partitioned); err != nil {
-		return false, err
-	}
-	return partitioned, nil
-}
-
-func (r *dashboardAggregationRepository) dropUsageLogsPartitions(ctx context.Context, cutoff time.Time) error {
-	rows, err := r.sql.QueryContext(ctx, `
-		SELECT c.relname
-		FROM pg_inherits
-		JOIN pg_class c ON c.oid = pg_inherits.inhrelid
-		JOIN pg_class p ON p.oid = pg_inherits.inhparent
-		WHERE p.relname = 'usage_logs'
-	`)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		_ = rows.Close()
-	}()
-
-	cutoffMonth := truncateToMonthUTC(cutoff)
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return err
-		}
-		if !strings.HasPrefix(name, "usage_logs_") {
-			continue
-		}
-		suffix := strings.TrimPrefix(name, "usage_logs_")
-		month, err := time.Parse("200601", suffix)
-		if err != nil {
-			continue
-		}
-		month = month.UTC()
-		if month.Before(cutoffMonth) {
-			if _, err := r.sql.ExecContext(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s", pq.QuoteIdentifier(name))); err != nil {
-				return err
-			}
-		}
-	}
-	return rows.Err()
-}
-
-func (r *dashboardAggregationRepository) createUsageLogsPartition(ctx context.Context, month time.Time) error {
-	monthStart := truncateToMonthUTC(month)
-	nextMonth := monthStart.AddDate(0, 1, 0)
-	name := fmt.Sprintf("usage_logs_%s", monthStart.Format("200601"))
-	query := fmt.Sprintf(
-		"CREATE TABLE IF NOT EXISTS %s PARTITION OF usage_logs FOR VALUES FROM (%s) TO (%s)",
-		pq.QuoteIdentifier(name),
-		pq.QuoteLiteral(monthStart.Format("2006-01-02")),
-		pq.QuoteLiteral(nextMonth.Format("2006-01-02")),
-	)
-	_, err := r.sql.ExecContext(ctx, query)
+	_, err := r.sql.ExecContext(ctx, query, start, end, start, end)
 	return err
 }
 
