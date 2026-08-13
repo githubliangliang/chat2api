@@ -35,27 +35,27 @@ CREATE TABLE IF NOT EXISTS user_avatars (
 CREATE UNIQUE INDEX IF NOT EXISTS user_avatars_user_id_key
     ON user_avatars (user_id);
 
-INSERT INTO settings (key, value)
+INSERT INTO settings (key, value, updated_at)
 VALUES
-    ('auth_source_default_email_balance', '0'),
-    ('auth_source_default_email_concurrency', '5'),
-    ('auth_source_default_email_subscriptions', '[]'),
-    ('auth_source_default_email_grant_on_signup', 'false'),
-    ('auth_source_default_email_grant_on_first_bind', 'false'),
-    ('auth_source_default_linuxdo_balance', '0'),
-    ('auth_source_default_linuxdo_concurrency', '5'),
-    ('auth_source_default_linuxdo_subscriptions', '[]'),
-    ('auth_source_default_linuxdo_grant_on_signup', 'false'),
-    ('auth_source_default_linuxdo_grant_on_first_bind', 'false'),
-    ('auth_source_default_oidc_balance', '0'),
-    ('auth_source_default_oidc_concurrency', '5'),
-    ('auth_source_default_oidc_subscriptions', '[]'),
-    ('auth_source_default_oidc_grant_on_signup', 'false'),
-    ('auth_source_default_oidc_grant_on_first_bind', 'false'),
-    ('auth_source_default_wechat_balance', '0'),
-    ('auth_source_default_wechat_concurrency', '5'),
-    ('auth_source_default_wechat_subscriptions', '[]'),
-    ('auth_source_default_wechat_grant_on_signup', 'false'),
-    ('auth_source_default_wechat_grant_on_first_bind', 'false'),
-    ('force_email_on_third_party_signup', 'false')
+	('auth_source_default_email_balance', '0', datetime('now')),
+	('auth_source_default_email_concurrency', '5', datetime('now')),
+	('auth_source_default_email_subscriptions', '[]', datetime('now')),
+	('auth_source_default_email_grant_on_signup', 'false', datetime('now')),
+	('auth_source_default_email_grant_on_first_bind', 'false', datetime('now')),
+	('auth_source_default_linuxdo_balance', '0', datetime('now')),
+	('auth_source_default_linuxdo_concurrency', '5', datetime('now')),
+	('auth_source_default_linuxdo_subscriptions', '[]', datetime('now')),
+	('auth_source_default_linuxdo_grant_on_signup', 'false', datetime('now')),
+	('auth_source_default_linuxdo_grant_on_first_bind', 'false', datetime('now')),
+	('auth_source_default_oidc_balance', '0', datetime('now')),
+	('auth_source_default_oidc_concurrency', '5', datetime('now')),
+	('auth_source_default_oidc_subscriptions', '[]', datetime('now')),
+	('auth_source_default_oidc_grant_on_signup', 'false', datetime('now')),
+	('auth_source_default_oidc_grant_on_first_bind', 'false', datetime('now')),
+	('auth_source_default_wechat_balance', '0', datetime('now')),
+	('auth_source_default_wechat_concurrency', '5', datetime('now')),
+	('auth_source_default_wechat_subscriptions', '[]', datetime('now')),
+	('auth_source_default_wechat_grant_on_signup', 'false', datetime('now')),
+	('auth_source_default_wechat_grant_on_first_bind', 'false', datetime('now')),
+	('force_email_on_third_party_signup', 'false', datetime('now'))
 ON CONFLICT (key) DO NOTHING;

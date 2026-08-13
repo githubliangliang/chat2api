@@ -118,6 +118,16 @@ func TestIsMigrationChecksumCompatible_AdditionalCases(t *testing.T) {
 
 func TestMigrationChecksumCompatibilityRules_CoverEditedUpgradeCompatibilityMigrations(t *testing.T) {
 	for _, name := range []string{
+		"001_init.sql",
+		"003_subscription.sql",
+		"005_schema_parity.sql",
+		"007_add_user_allowed_groups.sql",
+		"012_add_user_subscription_soft_delete.sql",
+		"018_user_attributes.sql",
+		"026_ops_metrics_aggregation_tables.sql",
+		"027_usage_billing_consistency.sql",
+		"030_add_account_expires_at.sql",
+		"033_add_promo_codes.sql",
 		"109_auth_identity_compat_backfill.sql",
 		"110_pending_auth_and_provider_default_grants.sql",
 		"112_add_payment_order_provider_key_snapshot.sql",

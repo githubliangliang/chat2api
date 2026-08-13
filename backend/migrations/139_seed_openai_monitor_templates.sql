@@ -7,10 +7,12 @@
 -- 所有模板都可直接选择；ON CONFLICT 保证重复部署不覆盖用户编辑。
 
 INSERT INTO channel_monitor_request_templates (
-    name, provider, api_mode, description, extra_headers, body_override_mode, body_override
+    created_at, updated_at, name, provider, api_mode, description, extra_headers, body_override_mode, body_override
 )
 VALUES
 (
+    datetime('now'),
+    datetime('now'),
     'OpenAI Compatible 默认检测',
     'openai',
     'chat_completions',
@@ -20,6 +22,8 @@ VALUES
     NULL
 ),
 (
+    datetime('now'),
+    datetime('now'),
     'OpenAI Compatible 低 token 检测',
     'openai',
     'chat_completions',
@@ -29,6 +33,8 @@ VALUES
     '{"max_tokens": 20}'
 ),
 (
+    datetime('now'),
+    datetime('now'),
     'OpenAI Responses / 本站自检',
     'openai',
     'responses',
@@ -38,6 +44,8 @@ VALUES
     NULL
 ),
 (
+    datetime('now'),
+    datetime('now'),
     'OpenAI Responses 低 token 检测',
     'openai',
     'responses',

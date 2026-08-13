@@ -11,9 +11,11 @@
 -- 用户可自行编辑后续覆盖此 seed；CC 升大版时再起一条 migration 提供新模板，不动用户的旧模板。
 
 INSERT INTO channel_monitor_request_templates (
-    name, provider, description, extra_headers, body_override_mode, body_override
+    created_at, updated_at, name, provider, description, extra_headers, body_override_mode, body_override
 )
 VALUES (
+    datetime('now'),
+    datetime('now'),
     'Claude Code 伪装',
     'anthropic',
     '完整模拟 Claude Code 2.1.114 客户端：UA + anthropic-beta + system + metadata.user_id 全部对齐，绕过 Anthropic 上游 ''Claude Code only'' 限制（如 Max 套餐）。',

@@ -1180,7 +1180,7 @@ func (r *accountRepository) ListOAuthRefreshCandidatePage(ctx context.Context, o
 	}
 	query += `
 		ORDER BY id ASC
-		LIMIT $3`
+		LIMIT ?`
 	args = append(args, options.Limit)
 
 	rows, err := r.sql.QueryContext(ctx, query, args...)

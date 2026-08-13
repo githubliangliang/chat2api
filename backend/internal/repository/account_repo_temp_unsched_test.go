@@ -353,6 +353,8 @@ func TestAccountRepository_ListOAuthRefreshCandidatePage_ReconciliationExcludesA
 	require.NotContains(t, normalized, "credentials ? 'refresh_token'",
 		"reconciliation must be able to find structurally invalid OAuth rows")
 	require.Contains(t, normalized, "ORDER BY id ASC")
+	require.Contains(t, normalized, "LIMIT ?")
+	require.NotContains(t, normalized, "LIMIT $3")
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

@@ -83,10 +83,10 @@ func TestMigration110SeedsAuthSourceSignupGrantsDisabledByDefault(t *testing.T) 
 	require.NoError(t, err)
 
 	sql := string(content)
-	require.Contains(t, sql, "('auth_source_default_email_grant_on_signup', 'false')")
-	require.Contains(t, sql, "('auth_source_default_linuxdo_grant_on_signup', 'false')")
-	require.Contains(t, sql, "('auth_source_default_oidc_grant_on_signup', 'false')")
-	require.Contains(t, sql, "('auth_source_default_wechat_grant_on_signup', 'false')")
+	require.Contains(t, sql, "('auth_source_default_email_grant_on_signup', 'false', datetime('now'))")
+	require.Contains(t, sql, "('auth_source_default_linuxdo_grant_on_signup', 'false', datetime('now'))")
+	require.Contains(t, sql, "('auth_source_default_oidc_grant_on_signup', 'false', datetime('now'))")
+	require.Contains(t, sql, "('auth_source_default_wechat_grant_on_signup', 'false', datetime('now'))")
 	require.NotContains(t, sql, "('auth_source_default_email_grant_on_signup', 'true')")
 }
 

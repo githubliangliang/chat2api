@@ -1,12 +1,35 @@
 package repository
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
+func TestIsMigrationRawChecksumCompatible(t *testing.T) {
+	content := []byte("SELECT 1;\n")
+	sum := sha256.Sum256(content)
+	rawChecksum := hex.EncodeToString(sum[:])
+
+	require.True(t, isMigrationRawChecksumCompatible(rawChecksum, content))
+	require.False(t, isMigrationRawChecksumCompatible(
+		"0000000000000000000000000000000000000000000000000000000000000000",
+		content,
+	))
+}
+
 func TestIsMigrationChecksumCompatible(t *testing.T) {
+	t.Run("001 SQLite历史checksum可兼容当前版本", func(t *testing.T) {
+		ok := isMigrationChecksumCompatible(
+			"001_init.sql",
+			"233d8e2bbae47d42f2d9d4846c86d1d04761178787157d9db69486174d1484b4",
+			"506edaa298f7e91f16bebff9b7254c6b55df42f1e0226f2222e42c3994372050",
+		)
+		require.True(t, ok)
+	})
+
 	t.Run("054历史checksum可兼容", func(t *testing.T) {
 		ok := isMigrationChecksumCompatible(
 			"054_drop_legacy_cache_columns.sql",
