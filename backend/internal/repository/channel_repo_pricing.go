@@ -4,12 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
-	"github.com/lib/pq"
 )
 
 // --- 模型定价 ---
@@ -196,7 +194,9 @@ func setGroupIDsTx(ctx context.Context, exec dbExec, channelID int64, groupIDs [
 		return nil
 	}
 	for _, groupID := range groupIDs {
-		if _, err := exec.ExecContext(ctx, `INSERT INTO channel_groups (channel_id, group_id) VALUES ($1, $2)`, channelID, groupID); err != nil { return fmt.Errorf("insert group associations: %w", err) }
+		if _, err := exec.ExecContext(ctx, `INSERT INTO channel_groups (channel_id, group_id) VALUES ($1, $2)`, channelID, groupID); err != nil {
+			return fmt.Errorf("insert group associations: %w", err)
+		}
 	}
 	return nil
 }
@@ -259,13 +259,9 @@ func replaceModelPricingTx(ctx context.Context, exec dbExec, channelID int64, pr
 	return nil
 }
 
-// isUniqueViolation 检查 pq 唯一约束违反错误
+// isUniqueViolation checks the active database driver's unique constraint error.
 func isUniqueViolation(err error) bool {
-	var pqErr *pq.Error
-	if errors.As(err, &pqErr) && pqErr != nil {
-		return pqErr.Code == "23505"
-	}
-	return false
+	return isUniqueConstraintViolation(err)
 }
 
 // escapeLike 转义 LIKE/ILIKE 模式中的特殊字符

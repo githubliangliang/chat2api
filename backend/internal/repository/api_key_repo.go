@@ -14,7 +14,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/schema/mixins"
 	"github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/internal/service"
-	"github.com/lib/pq"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 
@@ -551,22 +550,6 @@ func (r *apiKeyRepository) latestUsageLogIPs(ctx context.Context, apiKeyIDs []in
 }
 
 func latestUsageLogIPsQuery(apiKeyIDs []int64, dialectName string) (string, []any) {
-	if dialectName == dialect.Postgres {
-		// Keep each key lookup bounded to one ordered index probe instead of ranking its full history.
-		return `
-		SELECT requested.api_key_id, latest.ip_address
-		FROM unnest($1::bigint[]) AS requested(api_key_id)
-		CROSS JOIN LATERAL (
-			SELECT ul.ip_address
-			FROM usage_logs AS ul
-			WHERE ul.api_key_id = requested.api_key_id
-				AND ul.ip_address IS NOT NULL
-				AND ul.ip_address <> ''
-			ORDER BY ul.created_at DESC, ul.id DESC
-			LIMIT 1
-		) AS latest`, []any{pq.Array(apiKeyIDs)}
-	}
-
 	placeholders := make([]string, len(apiKeyIDs))
 	args := make([]any, len(apiKeyIDs))
 	for i, id := range apiKeyIDs {

@@ -126,18 +126,17 @@ func TestAPIKeyRepositoryListByUserIDAttachesLastUsedIP(t *testing.T) {
 	require.Nil(t, byID[noLogs.ID].LastUsedIP)
 }
 
-func TestLatestUsageLogIPsQueryPostgresUsesPerKeyLateralLookup(t *testing.T) {
+func TestLatestUsageLogIPsQueryUsesSQLiteWindowLookup(t *testing.T) {
 	query, args := latestUsageLogIPsQuery([]int64{11, 22}, dialect.Postgres)
 	normalizedQuery := strings.Join(strings.Fields(query), " ")
 
-	require.Contains(t, normalizedQuery, "FROM unnest($1::bigint[]) AS requested(api_key_id)")
-	require.Contains(t, normalizedQuery, "CROSS JOIN LATERAL")
-	require.Contains(t, normalizedQuery, "WHERE ul.api_key_id = requested.api_key_id")
-	require.Contains(t, normalizedQuery, "AND ul.ip_address IS NOT NULL")
-	require.Contains(t, normalizedQuery, "AND ul.ip_address <> ''")
-	require.Contains(t, normalizedQuery, "ORDER BY ul.created_at DESC, ul.id DESC LIMIT 1")
-	require.NotContains(t, normalizedQuery, "ROW_NUMBER")
-	require.Len(t, args, 1)
+	require.Contains(t, normalizedQuery, "ROW_NUMBER() OVER (PARTITION BY api_key_id ORDER BY created_at DESC, id DESC)")
+	require.Contains(t, normalizedQuery, "WHERE api_key_id IN (?, ?)")
+	require.Contains(t, normalizedQuery, "AND ip_address IS NOT NULL")
+	require.Contains(t, normalizedQuery, "AND ip_address <> ''")
+	require.NotContains(t, normalizedQuery, "unnest")
+	require.NotContains(t, normalizedQuery, "LATERAL")
+	require.Equal(t, []any{int64(11), int64(22)}, args)
 }
 
 func TestAPIKeyRepository_CreateWithLastUsedAt(t *testing.T) {
