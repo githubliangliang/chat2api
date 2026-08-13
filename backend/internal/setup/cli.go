@@ -68,67 +68,9 @@ func RunCLI() error {
 
 	// Database configuration with validation
 	fmt.Println("── Database Configuration ──")
-	fmt.Println("  Drivers: postgres (default) | sqlite (single-file, zero deps)")
-
-	for {
-		cfg.Database.Driver = strings.ToLower(promptString(reader, "Database Driver", "postgres"))
-		switch cfg.Database.Driver {
-		case "postgres", "postgresql", "pg":
-			cfg.Database.Driver = "postgres"
-		case "sqlite", "sqlite3":
-			cfg.Database.Driver = "sqlite"
-		default:
-			fmt.Println("  Invalid driver. Use: postgres or sqlite.")
-			continue
-		}
-		break
-	}
-
-	if cfg.Database.IsSQLite() {
-		cfg.Database.Path = promptString(reader, "SQLite File Path", "./data/sub2api.db")
-	} else {
-		for {
-			cfg.Database.Host = promptString(reader, "PostgreSQL Host", "localhost")
-			if cliValidateHostname(cfg.Database.Host) {
-				break
-			}
-			fmt.Println("  Invalid hostname format. Use alphanumeric, dots, hyphens only.")
-		}
-
-		for {
-			cfg.Database.Port = promptInt(reader, "PostgreSQL Port", 5432)
-			if cliValidatePort(cfg.Database.Port) {
-				break
-			}
-			fmt.Println("  Invalid port. Must be between 1 and 65535.")
-		}
-
-		for {
-			cfg.Database.User = promptString(reader, "PostgreSQL User", "postgres")
-			if cliValidateUsername(cfg.Database.User) {
-				break
-			}
-			fmt.Println("  Invalid username. Use alphanumeric and underscores only.")
-		}
-
-		cfg.Database.Password = promptPassword("PostgreSQL Password")
-
-		for {
-			cfg.Database.DBName = promptString(reader, "Database Name", "sub2api")
-			if cliValidateDBName(cfg.Database.DBName) {
-				break
-			}
-			fmt.Println("  Invalid database name. Start with letter, use alphanumeric and underscores.")
-		}
-
-		for {
-			cfg.Database.SSLMode = promptString(reader, "SSL Mode", "disable")
-			if cliValidateSSLMode(cfg.Database.SSLMode) {
-				break
-			}
-			fmt.Println("  Invalid SSL mode. Use: disable, require, verify-ca, or verify-full.")
-		}
-	}
+	fmt.Println("  Database: SQLite (single-file, zero dependencies)")
+	cfg.Database.Driver = "sqlite"
+	cfg.Database.Path = promptString(reader, "SQLite File Path", "./data/sub2api.db")
 
 	fmt.Println()
 	fmt.Print("Testing database connection... ")

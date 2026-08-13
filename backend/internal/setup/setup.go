@@ -587,7 +587,7 @@ func AutoSetupFromEnv() error {
 			Path:     getEnvOrDefault("DATABASE_PATH", "./data/sub2api.db"),
 			Host:     getEnvOrDefault("DATABASE_HOST", "localhost"),
 			Port:     getEnvIntOrDefault("DATABASE_PORT", 5432),
-			User:     getEnvOrDefault("DATABASE_USER", "postgres"),
+			User:     getEnvOrDefault("DATABASE_USER", ""),
 			Password: getEnvOrDefault("DATABASE_PASSWORD", ""),
 			DBName:   getEnvOrDefault("DATABASE_DBNAME", "sub2api"),
 			SSLMode:  getEnvOrDefault("DATABASE_SSLMODE", "disable"),

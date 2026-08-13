@@ -133,19 +133,7 @@ func testDatabase(c *gin.Context) {
 		return
 	}
 
-	driver := strings.ToLower(strings.TrimSpace(req.Driver))
-	if driver == "" {
-		driver = "postgres"
-	}
-	switch driver {
-	case "postgres", "postgresql", "pg":
-		driver = "postgres"
-	case "sqlite", "sqlite3":
-		driver = "sqlite"
-	default:
-		response.Error(c, http.StatusBadRequest, "Invalid database driver (postgres or sqlite)")
-		return
-	}
+	driver := "sqlite"
 
 	cfg := &DatabaseConfig{
 		Driver:   driver,
@@ -295,20 +283,8 @@ func install(c *gin.Context) {
 	req.Redis.Username = strings.TrimSpace(req.Redis.Username)
 
 	// ========== COMPREHENSIVE INPUT VALIDATION ==========
-	// Database validation (postgres vs sqlite)
-	req.Database.Driver = strings.ToLower(strings.TrimSpace(req.Database.Driver))
-	if req.Database.Driver == "" {
-		req.Database.Driver = "postgres"
-	}
-	switch req.Database.Driver {
-	case "postgres", "postgresql", "pg":
-		req.Database.Driver = "postgres"
-	case "sqlite", "sqlite3":
-		req.Database.Driver = "sqlite"
-	default:
-		response.Error(c, http.StatusBadRequest, "Invalid database driver (postgres or sqlite)")
-		return
-	}
+	// SQLite is the only supported database target.
+	req.Database.Driver = "sqlite"
 
 	if req.Database.IsSQLite() {
 		if strings.TrimSpace(req.Database.Path) == "" {
