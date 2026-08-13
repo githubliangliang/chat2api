@@ -1417,17 +1417,13 @@ func (s *ServerConfig) Address() string {
 	return fmt.Sprintf("%s:%d", s.Host, s.Port)
 }
 
-// Database drivers
-const (
-	DatabaseDriverPostgres = "postgres"
-	DatabaseDriverSQLite   = "sqlite"
-)
+const DatabaseDriverSQLite = "sqlite"
 
 // DatabaseConfig 数据库连接配置
 // 性能优化：新增连接池参数，避免频繁创建/销毁连接
-// 支持 PostgreSQL 与 SQLite 双驱动（driver=postgres|sqlite）。
+// Driver is retained for configuration compatibility; SQLite is the only target.
 type DatabaseConfig struct {
-	// Driver: postgres（默认）或 sqlite
+	// Driver is normalized to sqlite, including legacy values.
 	Driver string `mapstructure:"driver"`
 	// Path: SQLite 数据库文件路径（driver=sqlite 时使用），例如 ./data/sub2api.db
 	Path     string `mapstructure:"path"`
@@ -1455,17 +1451,9 @@ type DatabaseConfig struct {
 	UserPlatformQuotaFlushBatchSize int `mapstructure:"user_platform_quota_flush_batch_size"`
 }
 
-// NormalizedDriver returns the effective database driver (postgres|sqlite).
+// NormalizedDriver returns SQLite because it is the only supported database.
 func (d *DatabaseConfig) NormalizedDriver() string {
-	driver := strings.ToLower(strings.TrimSpace(d.Driver))
-	switch driver {
-	case "", DatabaseDriverPostgres, "postgresql", "pg":
-		return DatabaseDriverPostgres
-	case DatabaseDriverSQLite, "sqlite3":
-		return DatabaseDriverSQLite
-	default:
-		return driver
-	}
+	return DatabaseDriverSQLite
 }
 
 // IsSQLite reports whether the configured driver is SQLite.
@@ -1483,41 +1471,12 @@ func (d *DatabaseConfig) SQLitePath() string {
 }
 
 func (d *DatabaseConfig) DSN() string {
-	if d.IsSQLite() {
-		return d.sqliteDSN("")
-	}
-	// 当密码为空时不包含 password 参数，避免 libpq 解析错误
-	if d.Password == "" {
-		return fmt.Sprintf(
-			"host=%s port=%d user=%s dbname=%s sslmode=%s",
-			d.Host, d.Port, d.User, d.DBName, d.SSLMode,
-		)
-	}
-	return fmt.Sprintf(
-		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
-		d.Host, d.Port, d.User, d.Password, d.DBName, d.SSLMode,
-	)
+	return d.sqliteDSN("")
 }
 
-// DSNWithTimezone returns DSN with timezone setting
+// DSNWithTimezone returns the SQLite DSN. SQLite has no session timezone.
 func (d *DatabaseConfig) DSNWithTimezone(tz string) string {
-	if d.IsSQLite() {
-		return d.sqliteDSN(tz)
-	}
-	if tz == "" {
-		tz = "Asia/Shanghai"
-	}
-	// 当密码为空时不包含 password 参数，避免 libpq 解析错误
-	if d.Password == "" {
-		return fmt.Sprintf(
-			"host=%s port=%d user=%s dbname=%s sslmode=%s TimeZone=%s",
-			d.Host, d.Port, d.User, d.DBName, d.SSLMode, tz,
-		)
-	}
-	return fmt.Sprintf(
-		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s TimeZone=%s",
-		d.Host, d.Port, d.User, d.Password, d.DBName, d.SSLMode, tz,
-	)
+	return d.sqliteDSN(tz)
 }
 
 // sqliteDSN builds a modernc.org/sqlite DSN with pragmas suitable for concurrent app use.
@@ -1539,9 +1498,9 @@ func (d *DatabaseConfig) sqliteDSN(tz string) string {
 type RedisConfig struct {
 	// Enabled: 是否连接外部 Redis。false 时使用嵌入式内存 Redis，适合单机部署。
 	// 未显式配置时默认 true；若 host 为空字符串且 enabled 未设置，运行期会视为禁用。
-	Enabled *bool `mapstructure:"enabled"`
-	Host    string `mapstructure:"host"`
-	Port    int    `mapstructure:"port"`
+	Enabled  *bool  `mapstructure:"enabled"`
+	Host     string `mapstructure:"host"`
+	Port     int    `mapstructure:"port"`
 	Username string `mapstructure:"username"`
 	Password string `mapstructure:"password"`
 	DB       int    `mapstructure:"db"`
@@ -2133,7 +2092,7 @@ func setDefaults() {
 	viper.SetDefault("dingtalk_connect.username_overwrite_policy", "if_empty")
 
 	// Database
-	viper.SetDefault("database.driver", DatabaseDriverPostgres)
+	viper.SetDefault("database.driver", DatabaseDriverSQLite)
 	viper.SetDefault("database.path", "./data/sub2api.db")
 	viper.SetDefault("database.host", "localhost")
 	viper.SetDefault("database.port", 5432)
@@ -2998,12 +2957,6 @@ func (c *Config) Validate() error {
 	}
 	if c.Billing.MinimumBalanceReserve < 0 {
 		return fmt.Errorf("billing.minimum_balance_reserve must be non-negative")
-	}
-	switch c.Database.NormalizedDriver() {
-	case DatabaseDriverPostgres, DatabaseDriverSQLite:
-		// ok
-	default:
-		return fmt.Errorf("database.driver must be %q or %q", DatabaseDriverPostgres, DatabaseDriverSQLite)
 	}
 	if c.Database.IsSQLite() {
 		if strings.TrimSpace(c.Database.SQLitePath()) == "" {

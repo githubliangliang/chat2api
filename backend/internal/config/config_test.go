@@ -1188,6 +1188,7 @@ func TestConfigAddressHelpers(t *testing.T) {
 	}
 
 	dbCfg := DatabaseConfig{
+		Path:     "/tmp/sub2api-config-address.db",
 		Host:     "localhost",
 		Port:     5432,
 		User:     "postgres",
@@ -1195,14 +1196,13 @@ func TestConfigAddressHelpers(t *testing.T) {
 		DBName:   "sub2api",
 		SSLMode:  "disable",
 	}
-	if !strings.Contains(dbCfg.DSN(), "password=") {
-	} else {
-		t.Fatalf("DatabaseConfig.DSN() should not include password when empty")
+	if !strings.Contains(dbCfg.DSN(), "file:/tmp/sub2api-config-address.db") {
+		t.Fatalf("DatabaseConfig.DSN() should use the SQLite path: %q", dbCfg.DSN())
 	}
 
 	dbCfg.Password = "secret"
-	if !strings.Contains(dbCfg.DSN(), "password=secret") {
-		t.Fatalf("DatabaseConfig.DSN() missing password")
+	if strings.Contains(dbCfg.DSN(), "password=secret") {
+		t.Fatalf("DatabaseConfig.DSN() retained a PostgreSQL password: %q", dbCfg.DSN())
 	}
 
 	dbCfg.Password = ""
@@ -1210,11 +1210,8 @@ func TestConfigAddressHelpers(t *testing.T) {
 		t.Fatalf("DatabaseConfig.DSNWithTimezone() should omit password when empty")
 	}
 
-	if !strings.Contains(dbCfg.DSNWithTimezone(""), "TimeZone=Asia/Shanghai") {
-		t.Fatalf("DatabaseConfig.DSNWithTimezone() should use default timezone")
-	}
-	if !strings.Contains(dbCfg.DSNWithTimezone("UTC"), "TimeZone=UTC") {
-		t.Fatalf("DatabaseConfig.DSNWithTimezone() should use provided timezone")
+	if dbCfg.DSNWithTimezone("") != dbCfg.DSNWithTimezone("UTC") {
+		t.Fatalf("SQLite DSN must not depend on a session timezone")
 	}
 
 	redis := RedisConfig{Host: "redis", Port: 6379}
@@ -1432,6 +1429,8 @@ func TestGenerateJWTSecretWithLength(t *testing.T) {
 
 func TestDatabaseDSNWithTimezone_WithPassword(t *testing.T) {
 	d := &DatabaseConfig{
+		Driver:   "postgres",
+		Path:     "/tmp/sub2api-config-test.db",
 		Host:     "localhost",
 		Port:     5432,
 		User:     "u",
@@ -1440,11 +1439,17 @@ func TestDatabaseDSNWithTimezone_WithPassword(t *testing.T) {
 		SSLMode:  "prefer",
 	}
 	got := d.DSNWithTimezone("UTC")
-	if !strings.Contains(got, "password=p") {
-		t.Fatalf("DSNWithTimezone should include password: %q", got)
+	if d.NormalizedDriver() != DatabaseDriverSQLite {
+		t.Fatalf("NormalizedDriver() = %q, want %q", d.NormalizedDriver(), DatabaseDriverSQLite)
 	}
-	if !strings.Contains(got, "TimeZone=UTC") {
-		t.Fatalf("DSNWithTimezone should include TimeZone=UTC: %q", got)
+	if !d.IsSQLite() {
+		t.Fatal("legacy PostgreSQL driver value must still select SQLite")
+	}
+	if !strings.Contains(got, "file:/tmp/sub2api-config-test.db") {
+		t.Fatalf("DSNWithTimezone should use SQLite path: %q", got)
+	}
+	if strings.Contains(got, "host=") || strings.Contains(got, "password=") || strings.Contains(got, "TimeZone=") {
+		t.Fatalf("DSNWithTimezone retained PostgreSQL connection fields: %q", got)
 	}
 }
 

@@ -15,7 +15,7 @@ import (
 
 func TestOpenEntDriverUsesSQLiteAsOnlyDialect(t *testing.T) {
 	cfg := &config.Config{}
-	cfg.Database.Driver = config.DatabaseDriverPostgres
+	cfg.Database.Driver = "postgres"
 	cfg.Database.Path = t.TempDir() + "/sub2api.db"
 
 	drv, err := openEntDriver(cfg)
