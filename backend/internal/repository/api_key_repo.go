@@ -804,6 +804,17 @@ func (r *apiKeyRepository) UpdateLastUsed(ctx context.Context, id int64, usedAt 
 // IncrementRateLimitUsage atomically increments all rate limit usage counters and initializes
 // window start times via COALESCE if not already set.
 func (r *apiKeyRepository) IncrementRateLimitUsage(ctx context.Context, id int64, cost float64) error {
+	if r.client == nil || r.client.Driver().Dialect() == dialect.SQLite {
+		_, err := r.sql.ExecContext(ctx, `UPDATE api_keys SET
+			usage_5h = CASE WHEN window_5h_start IS NOT NULL AND datetime(window_5h_start, '+5 hours') <= CURRENT_TIMESTAMP THEN $1 ELSE usage_5h + $1 END,
+			usage_1d = CASE WHEN window_1d_start IS NOT NULL AND datetime(window_1d_start, '+24 hours') <= CURRENT_TIMESTAMP THEN $1 ELSE usage_1d + $1 END,
+			usage_7d = CASE WHEN window_7d_start IS NOT NULL AND datetime(window_7d_start, '+7 days') <= CURRENT_TIMESTAMP THEN $1 ELSE usage_7d + $1 END,
+			window_5h_start = CASE WHEN window_5h_start IS NULL OR datetime(window_5h_start, '+5 hours') <= CURRENT_TIMESTAMP THEN CURRENT_TIMESTAMP ELSE window_5h_start END,
+			window_1d_start = CASE WHEN window_1d_start IS NULL OR datetime(window_1d_start, '+24 hours') <= CURRENT_TIMESTAMP THEN datetime('now', 'start of day') ELSE window_1d_start END,
+			window_7d_start = CASE WHEN window_7d_start IS NULL OR datetime(window_7d_start, '+7 days') <= CURRENT_TIMESTAMP THEN datetime('now', 'start of day') ELSE window_7d_start END,
+			updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND deleted_at IS NULL`, cost, id)
+		return err
+	}
 	_, err := r.sql.ExecContext(ctx, `
 		UPDATE api_keys SET
 			usage_5h = CASE WHEN window_5h_start IS NOT NULL AND window_5h_start + INTERVAL '5 hours' <= NOW() THEN $1 ELSE usage_5h + $1 END,
@@ -820,6 +831,17 @@ func (r *apiKeyRepository) IncrementRateLimitUsage(ctx context.Context, id int64
 
 // ResetRateLimitWindows resets expired rate limit windows atomically.
 func (r *apiKeyRepository) ResetRateLimitWindows(ctx context.Context, id int64) error {
+	if r.client == nil || r.client.Driver().Dialect() == dialect.SQLite {
+		_, err := r.sql.ExecContext(ctx, `UPDATE api_keys SET
+			usage_5h = CASE WHEN window_5h_start IS NOT NULL AND datetime(window_5h_start, '+5 hours') <= CURRENT_TIMESTAMP THEN 0 ELSE usage_5h END,
+			window_5h_start = CASE WHEN window_5h_start IS NOT NULL AND datetime(window_5h_start, '+5 hours') <= CURRENT_TIMESTAMP THEN CURRENT_TIMESTAMP ELSE window_5h_start END,
+			usage_1d = CASE WHEN window_1d_start IS NOT NULL AND datetime(window_1d_start, '+24 hours') <= CURRENT_TIMESTAMP THEN 0 ELSE usage_1d END,
+			window_1d_start = CASE WHEN window_1d_start IS NOT NULL AND datetime(window_1d_start, '+24 hours') <= CURRENT_TIMESTAMP THEN datetime('now', 'start of day') ELSE window_1d_start END,
+			usage_7d = CASE WHEN window_7d_start IS NOT NULL AND datetime(window_7d_start, '+7 days') <= CURRENT_TIMESTAMP THEN 0 ELSE usage_7d END,
+			window_7d_start = CASE WHEN window_7d_start IS NOT NULL AND datetime(window_7d_start, '+7 days') <= CURRENT_TIMESTAMP THEN datetime('now', 'start of day') ELSE window_7d_start END,
+			updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND deleted_at IS NULL`, id)
+		return err
+	}
 	_, err := r.sql.ExecContext(ctx, `
 		UPDATE api_keys SET
 			usage_5h = CASE WHEN window_5h_start IS NOT NULL AND window_5h_start + INTERVAL '5 hours' <= NOW() THEN 0 ELSE usage_5h END,
