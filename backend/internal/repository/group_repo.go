@@ -15,6 +15,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
 
+	"entgo.io/ent/dialect"
 	entsql "entgo.io/ent/dialect/sql"
 )
 
@@ -810,7 +811,12 @@ func (r *groupRepository) DeleteCascade(ctx context.Context, id int64) ([]int64,
 
 	// Lock the group row to avoid concurrent writes while we cascade.
 	// 这里使用 exec.QueryContext 手动扫描，确保同一事务内加锁并能区分"未找到"与其他错误。
-	rows, err := exec.QueryContext(ctx, "SELECT id FROM groups WHERE id = $1 AND deleted_at IS NULL FOR UPDATE", id)
+	// SQLite does not support SELECT ... FOR UPDATE; WAL + single-writer already serializes writers.
+	lockSQL := "SELECT id FROM groups WHERE id = $1 AND deleted_at IS NULL FOR UPDATE"
+	if r.client != nil && r.client.Driver().Dialect() == dialect.SQLite {
+		lockSQL = "SELECT id FROM groups WHERE id = $1 AND deleted_at IS NULL"
+	}
+	rows, err := exec.QueryContext(ctx, lockSQL, id)
 	if err != nil {
 		return nil, err
 	}
