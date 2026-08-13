@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	_ "modernc.org/sqlite"
 )
 
 func TestWriteOpenAIFastPolicyBlockedResponseMarksBusinessLimited(t *testing.T) {
@@ -24,6 +26,30 @@ func TestWriteOpenAIFastPolicyBlockedResponseMarksBusinessLimited(t *testing.T) 
 	reason, ok := c.Get(OpsClientBusinessLimitedReasonKey)
 	require.True(t, ok)
 	require.Equal(t, OpsClientBusinessLimitedReasonLocalPolicyDenied, reason)
+}
+
+func TestOpsMetricsCollectorQueryUsageLatencySQLite(t *testing.T) {
+	db, err := sql.Open("sqlite", "file:ops-metrics-latency?mode=memory&cache=shared")
+	require.NoError(t, err)
+	defer db.Close()
+	_, err = db.Exec(`CREATE TABLE usage_logs (created_at DATETIME, duration_ms INTEGER, first_token_ms INTEGER)`)
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO usage_logs(created_at, duration_ms, first_token_ms) VALUES
+		('2026-05-26 10:10:00', 100, 10),
+		('2026-05-26 10:20:00', 200, 20),
+		('2026-05-26 10:30:00', 300, 30),
+		('2026-05-26 10:40:00', 400, 40)`)
+	require.NoError(t, err)
+
+	collector := &OpsMetricsCollector{db: db}
+	start := time.Date(2026, 5, 26, 10, 0, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+	duration, ttft, err := collector.queryUsageLatency(context.Background(), start, end)
+	require.NoError(t, err)
+	require.Equal(t, 250, *duration.p50)
+	require.Equal(t, 397, *duration.p99)
+	require.Equal(t, 25, *ttft.p50)
+	require.Equal(t, 40, *ttft.max)
 }
 
 func TestOpsMetricsCollectorQueryErrorCountsExcludesCountTokens(t *testing.T) {

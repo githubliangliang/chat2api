@@ -462,72 +462,60 @@ WHERE created_at >= $1 AND created_at < $2`
 }
 
 func (c *OpsMetricsCollector) queryUsageLatency(ctx context.Context, start, end time.Time) (duration opsCollectedPercentiles, ttft opsCollectedPercentiles, err error) {
-	{
-		q := `
-SELECT
-  percentile_cont(0.50) WITHIN GROUP (ORDER BY duration_ms) AS p50,
-  percentile_cont(0.90) WITHIN GROUP (ORDER BY duration_ms) AS p90,
-  percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms) AS p95,
-  percentile_cont(0.99) WITHIN GROUP (ORDER BY duration_ms) AS p99,
-  AVG(duration_ms) AS avg_ms,
-  MAX(duration_ms) AS max_ms
-FROM usage_logs
-WHERE created_at >= $1 AND created_at < $2
-  AND duration_ms IS NOT NULL`
-
-		var p50, p90, p95, p99 sql.NullFloat64
-		var avg sql.NullFloat64
-		var max sql.NullInt64
-		if err := c.db.QueryRowContext(ctx, q, start, end).Scan(&p50, &p90, &p95, &p99, &avg, &max); err != nil {
-			return opsCollectedPercentiles{}, opsCollectedPercentiles{}, err
+	query := func(column string) (opsCollectedPercentiles, error) {
+		rows, err := c.db.QueryContext(ctx, "SELECT "+column+" FROM usage_logs WHERE created_at >= $1 AND created_at < $2 AND "+column+" IS NOT NULL ORDER BY "+column, start, end)
+		if err != nil {
+			return opsCollectedPercentiles{}, err
 		}
-		duration.p50 = floatToIntPtr(p50)
-		duration.p90 = floatToIntPtr(p90)
-		duration.p95 = floatToIntPtr(p95)
-		duration.p99 = floatToIntPtr(p99)
-		if avg.Valid {
-			v := roundTo1DP(avg.Float64)
-			duration.avg = &v
+		defer rows.Close()
+		values := make([]float64, 0)
+		for rows.Next() {
+			var value float64
+			if err := rows.Scan(&value); err != nil {
+				return opsCollectedPercentiles{}, err
+			}
+			values = append(values, value)
 		}
-		if max.Valid {
-			v := int(max.Int64)
-			duration.max = &v
+		if err := rows.Err(); err != nil {
+			return opsCollectedPercentiles{}, err
 		}
+		if len(values) == 0 {
+			return opsCollectedPercentiles{}, nil
+		}
+		percentile := func(rank float64) *int {
+			position := rank * float64(len(values)-1)
+			lower := int(math.Floor(position))
+			upper := int(math.Ceil(position))
+			value := values[lower]
+			if upper != lower {
+				value += (values[upper] - value) * (position - float64(lower))
+			}
+			return intPtr(int(math.Round(value)))
+		}
+		result := opsCollectedPercentiles{
+			p50: percentile(0.50),
+			p90: percentile(0.90),
+			p95: percentile(0.95),
+			p99: percentile(0.99),
+		}
+		var sum float64
+		for _, value := range values {
+			sum += value
+		}
+		avg := roundTo1DP(sum / float64(len(values)))
+		result.avg = &avg
+		max := int(math.Round(values[len(values)-1]))
+		result.max = &max
+		return result, nil
 	}
-
-	{
-		q := `
-SELECT
-  percentile_cont(0.50) WITHIN GROUP (ORDER BY first_token_ms) AS p50,
-  percentile_cont(0.90) WITHIN GROUP (ORDER BY first_token_ms) AS p90,
-  percentile_cont(0.95) WITHIN GROUP (ORDER BY first_token_ms) AS p95,
-  percentile_cont(0.99) WITHIN GROUP (ORDER BY first_token_ms) AS p99,
-  AVG(first_token_ms) AS avg_ms,
-  MAX(first_token_ms) AS max_ms
-FROM usage_logs
-WHERE created_at >= $1 AND created_at < $2
-  AND first_token_ms IS NOT NULL`
-
-		var p50, p90, p95, p99 sql.NullFloat64
-		var avg sql.NullFloat64
-		var max sql.NullInt64
-		if err := c.db.QueryRowContext(ctx, q, start, end).Scan(&p50, &p90, &p95, &p99, &avg, &max); err != nil {
-			return opsCollectedPercentiles{}, opsCollectedPercentiles{}, err
-		}
-		ttft.p50 = floatToIntPtr(p50)
-		ttft.p90 = floatToIntPtr(p90)
-		ttft.p95 = floatToIntPtr(p95)
-		ttft.p99 = floatToIntPtr(p99)
-		if avg.Valid {
-			v := roundTo1DP(avg.Float64)
-			ttft.avg = &v
-		}
-		if max.Valid {
-			v := int(max.Int64)
-			ttft.max = &v
-		}
+	duration, err = query("duration_ms")
+	if err != nil {
+		return opsCollectedPercentiles{}, opsCollectedPercentiles{}, err
 	}
-
+	ttft, err = query("first_token_ms")
+	if err != nil {
+		return opsCollectedPercentiles{}, opsCollectedPercentiles{}, err
+	}
 	return duration, ttft, nil
 }
 
