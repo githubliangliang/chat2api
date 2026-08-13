@@ -90,11 +90,8 @@ func (r *channelRepository) ReplaceModelPricing(ctx context.Context, channelID i
 
 // batchLoadModelPricing 批量加载多个渠道的模型定价（含区间）
 func (r *channelRepository) batchLoadModelPricing(ctx context.Context, channelIDs []int64) (map[int64][]service.ChannelModelPricing, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, channel_id, platform, models, billing_mode, input_price, output_price, cache_write_price, cache_read_price, image_input_price, image_output_price, per_request_price, created_at, updated_at
-		 FROM channel_model_pricing WHERE channel_id = ANY($1) ORDER BY channel_id, id`,
-		pq.Array(channelIDs),
-	)
+	clause, args := sqlInt64In("channel_id", channelIDs, 1)
+	rows, err := r.db.QueryContext(ctx, `SELECT id, channel_id, platform, models, billing_mode, input_price, output_price, cache_write_price, cache_read_price, image_input_price, image_output_price, per_request_price, created_at, updated_at FROM channel_model_pricing WHERE `+clause+` ORDER BY channel_id, id`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("batch load model pricing: %w", err)
 	}
@@ -129,14 +126,8 @@ func (r *channelRepository) batchLoadModelPricing(ctx context.Context, channelID
 
 // batchLoadIntervals 批量加载多个定价条目的区间
 func (r *channelRepository) batchLoadIntervals(ctx context.Context, pricingIDs []int64) (map[int64][]service.PricingInterval, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, pricing_id, min_tokens, max_tokens, tier_label,
-		        input_price, output_price, cache_write_price, cache_read_price,
-		        per_request_price, sort_order, created_at, updated_at
-		 FROM channel_pricing_intervals
-		 WHERE pricing_id = ANY($1) ORDER BY pricing_id, sort_order, id`,
-		pq.Array(pricingIDs),
-	)
+	clause, args := sqlInt64In("pricing_id", pricingIDs, 1)
+	rows, err := r.db.QueryContext(ctx, `SELECT id, pricing_id, min_tokens, max_tokens, tier_label, input_price, output_price, cache_write_price, cache_read_price, per_request_price, sort_order, created_at, updated_at FROM channel_pricing_intervals WHERE `+clause+` ORDER BY pricing_id, sort_order, id`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("batch load intervals: %w", err)
 	}
@@ -204,13 +195,8 @@ func setGroupIDsTx(ctx context.Context, exec dbExec, channelID int64, groupIDs [
 	if len(groupIDs) == 0 {
 		return nil
 	}
-	_, err := exec.ExecContext(ctx,
-		`INSERT INTO channel_groups (channel_id, group_id)
-		 SELECT $1, unnest($2::bigint[])`,
-		channelID, pq.Array(groupIDs),
-	)
-	if err != nil {
-		return fmt.Errorf("insert group associations: %w", err)
+	for _, groupID := range groupIDs {
+		if _, err := exec.ExecContext(ctx, `INSERT INTO channel_groups (channel_id, group_id) VALUES ($1, $2)`, channelID, groupID); err != nil { return fmt.Errorf("insert group associations: %w", err) }
 	}
 	return nil
 }

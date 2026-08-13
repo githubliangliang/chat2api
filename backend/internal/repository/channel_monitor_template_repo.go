@@ -10,7 +10,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/channelmonitor"
 	"github.com/Wei-Shaw/sub2api/ent/channelmonitorrequesttemplate"
 	"github.com/Wei-Shaw/sub2api/internal/service"
-	"github.com/lib/pq"
 )
 
 // channelMonitorRequestTemplateRepository 实现 service.ChannelMonitorRequestTemplateRepository。
@@ -181,19 +180,8 @@ func (r *channelMonitorRequestTemplateRepository) applyToMonitorsWithClient(
 	if err != nil {
 		return 0, fmt.Errorf("marshal template headers: %w", err)
 	}
-	result, err := client.ExecContext(ctx, `
-		UPDATE channel_monitors
-		SET extra_headers = $1::jsonb || CASE
-			WHEN COALESCE(extra_headers, '{}'::jsonb) ? ($2::text)
-			THEN jsonb_build_object($2::text, COALESCE(extra_headers, '{}'::jsonb) -> ($2::text))
-			ELSE '{}'::jsonb
-		END
-		WHERE template_id = $3
-		  AND id = ANY($4)
-		  AND provider = $5
-		  AND api_mode = $6
-	`, string(templateHeadersJSON), service.ChannelMonitorDuplicateOperationIDMetadataKey,
-		id, pq.Array(monitorIDs), string(tpl.Provider), defaultAPIModeRepo(tpl.APIMode))
+	inClause, inArgs := sqlInt64In("id", monitorIDs, 4)
+	result, err := client.ExecContext(ctx, `UPDATE channel_monitors SET extra_headers = json_set(json_patch(COALESCE(extra_headers, '{}'), json($1)), '$.' || $2, json_extract(COALESCE(extra_headers, '{}'), '$.' || $2)) WHERE template_id = $3 AND `+inClause+` AND provider = $`+itoa(4+len(inArgs))+` AND api_mode = $`+itoa(5+len(inArgs)), append([]any{string(templateHeadersJSON), service.ChannelMonitorDuplicateOperationIDMetadataKey, id}, append(inArgs, string(tpl.Provider), defaultAPIModeRepo(tpl.APIMode))...)...)
 	if err != nil {
 		return 0, fmt.Errorf("apply template headers to monitors: %w", err)
 	}
