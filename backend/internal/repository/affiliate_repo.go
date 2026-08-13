@@ -12,7 +12,6 @@ import (
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/internal/service"
-	"github.com/lib/pq"
 )
 
 const (
@@ -387,7 +386,7 @@ func (r *affiliateRepository) ListAffiliateInviteRecords(ctx context.Context, fi
 	client := clientFromContext(ctx, r.client)
 	where, args := buildAffiliateRecordWhere(filter, "ua.created_at", []string{
 		"inviter.email", "inviter.username", "invitee.email", "invitee.username",
-		"ua.inviter_id::text", "ua.user_id::text", "inviter_aff.aff_code",
+		"CAST(ua.inviter_id AS TEXT)", "CAST(ua.user_id AS TEXT)", "inviter_aff.aff_code",
 	})
 
 	total, err := queryAffiliateRecordCount(ctx, client, `
@@ -464,7 +463,7 @@ func (r *affiliateRepository) ListAffiliateRebateRecords(ctx context.Context, fi
 	client := clientFromContext(ctx, r.client)
 	where, args := buildAffiliateRecordWhere(filter, "ual.created_at", []string{
 		"inviter.email", "inviter.username", "invitee.email", "invitee.username",
-		"po.id::text", "po.out_trade_no", "po.payment_type", "po.status",
+		"CAST(po.id AS TEXT)", "po.out_trade_no", "po.payment_type", "po.status",
 	})
 	baseJoin := `
 FROM user_affiliate_ledger ual
@@ -549,7 +548,7 @@ LIMIT $`+fmt.Sprint(len(args)-1)+` OFFSET $`+fmt.Sprint(len(args)), args...)
 func (r *affiliateRepository) ListAffiliateTransferRecords(ctx context.Context, filter service.AffiliateRecordFilter) ([]service.AffiliateTransferRecord, int64, error) {
 	client := clientFromContext(ctx, r.client)
 	where, args := buildAffiliateRecordWhere(filter, "ual.created_at", []string{
-		"u.email", "u.username", "u.id::text",
+		"u.email", "u.username", "CAST(u.id AS TEXT)",
 	})
 	baseJoin := `
 FROM user_affiliate_ledger ual
@@ -707,7 +706,7 @@ func buildAffiliateRecordOrderBy(filter service.AffiliateRecordFilter, sortColum
 	if !filter.SortDesc {
 		direction = "ASC"
 	}
-	return "ORDER BY " + column + " " + direction + " NULLS LAST"
+	return "ORDER BY " + column + " IS NULL, " + column + " " + direction
 }
 
 func queryAffiliateRecordCount(ctx context.Context, client affiliateQueryExecer, query string, args ...any) (int64, error) {
@@ -970,11 +969,7 @@ func generateAffiliateCode() (string, error) {
 }
 
 func isAffiliateUniqueViolation(err error) bool {
-	var pqErr *pq.Error
-	if errors.As(err, &pqErr) {
-		return string(pqErr.Code) == "23505"
-	}
-	return false
+	return isUniqueConstraintViolation(err)
 }
 
 // UpdateUserAffCode 改写用户的邀请码（自定义专属邀请码）。
@@ -1095,11 +1090,12 @@ func (r *affiliateRepository) BatchSetUserRebateRate(ctx context.Context, userID
 				return err
 			}
 		}
+		clause, idArgs := sqlInt64In("user_id", userIDs, 2)
 		_, err := txClient.ExecContext(txCtx, `
 UPDATE user_affiliates
 SET aff_rebate_rate_percent = $1,
-    updated_at = NOW()
-WHERE user_id = ANY($2)`, nullableArg(ratePercent), pq.Array(userIDs))
+    updated_at = CURRENT_TIMESTAMP
+WHERE `+clause, append([]any{nullableArg(ratePercent)}, idArgs...)...)
 		if err != nil {
 			return fmt.Errorf("batch set aff_rebate_rate_percent: %w", err)
 		}
