@@ -242,7 +242,7 @@ func TestExecUsageLogInsertNoResult_PersistsRequestedModel(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestPrepareUsageLogInsert_ArgCountMatchesTypes(t *testing.T) {
+func TestPrepareUsageLogInsert_ArgCountMatchesColumns(t *testing.T) {
 	prepared := prepareUsageLogInsert(&service.UsageLog{
 		UserID:         1,
 		APIKeyID:       2,
@@ -253,7 +253,7 @@ func TestPrepareUsageLogInsert_ArgCountMatchesTypes(t *testing.T) {
 		CreatedAt:      time.Date(2025, 1, 5, 12, 0, 0, 0, time.UTC),
 	})
 
-	require.Len(t, prepared.args, len(usageLogInsertArgTypes))
+	require.Len(t, prepared.args, 59)
 }
 
 func TestPrepareUsageLogInsert_PersistsImageSizeMetadata(t *testing.T) {

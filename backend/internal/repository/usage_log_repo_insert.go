@@ -16,75 +16,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
-// usageLogInsertArgTypes must stay in the same order as:
-//  1. prepareUsageLogInsert().args
-//  2. every INSERT/CTE VALUES column list in this file
-//  3. execUsageLogInsertNoResult placeholder positions
-//  4. scanUsageLog selected column order (via usageLogSelectColumns)
-//
-// When adding a usage_logs column, update all of those call sites together.
-var usageLogInsertArgTypes = [...]string{
-	"bigint",      // user_id
-	"bigint",      // api_key_id
-	"bigint",      // account_id
-	"text",        // request_id
-	"text",        // model
-	"text",        // requested_model
-	"text",        // upstream_model
-	"text",        // upstream_response_model
-	"boolean",     // upstream_model_mismatch
-	"bigint",      // group_id
-	"bigint",      // subscription_id
-	"integer",     // input_tokens
-	"integer",     // output_tokens
-	"integer",     // cache_creation_tokens
-	"integer",     // cache_read_tokens
-	"integer",     // cache_creation_5m_tokens
-	"integer",     // cache_creation_1h_tokens
-	"integer",     // image_output_tokens
-	"numeric",     // image_output_cost
-	"integer",     // image_input_tokens
-	"numeric",     // image_input_cost
-	"numeric",     // input_cost
-	"numeric",     // output_cost
-	"numeric",     // cache_creation_cost
-	"numeric",     // cache_read_cost
-	"numeric",     // total_cost
-	"numeric",     // actual_cost
-	"numeric",     // rate_multiplier
-	"numeric",     // account_rate_multiplier
-	"smallint",    // billing_type
-	"smallint",    // request_type
-	"boolean",     // stream
-	"boolean",     // openai_ws_mode
-	"integer",     // duration_ms
-	"integer",     // first_token_ms
-	"text",        // user_agent
-	"text",        // ip_address
-	"integer",     // image_count
-	"text",        // image_size
-	"text",        // image_input_size
-	"text",        // image_output_size
-	"text",        // image_size_source
-	"jsonb",       // image_size_breakdown
-	"integer",     // video_count
-	"text",        // video_resolution
-	"integer",     // video_duration_seconds
-	"text",        // service_tier
-	"text",        // reasoning_effort
-	"text",        // inbound_endpoint
-	"text",        // upstream_endpoint
-	"boolean",     // cache_ttl_overridden
-	"boolean",     // long_context_billing_applied
-	"bigint",      // channel_id
-	"text",        // model_mapping_chain
-	"text",        // billing_tier
-	"text",        // billing_mode
-	"numeric",     // account_stats_cost
-	"text",        // session_id
-	"timestamptz", // created_at
-}
-
 const (
 	usageLogCreateBatchMaxSize  = 64
 	usageLogCreateBatchWindow   = 3 * time.Millisecond
@@ -758,10 +689,6 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 			_, _ = query.WriteString(",")
 			_, _ = query.WriteString("$")
 			_, _ = query.WriteString(strconv.Itoa(argPos))
-			if i < len(usageLogInsertArgTypes) {
-				_, _ = query.WriteString("::")
-				_, _ = query.WriteString(usageLogInsertArgTypes[i])
-			}
 			argPos++
 		}
 		_, _ = query.WriteString(")")
@@ -922,7 +849,7 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 				)
 				ORDER BY resolved.input_idx
 			),
-			'[]'::json
+			'[]'
 		)
 		FROM resolved
 	`)
@@ -1007,10 +934,6 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			}
 			_, _ = query.WriteString("$")
 			_, _ = query.WriteString(strconv.Itoa(argPos))
-			if i < len(usageLogInsertArgTypes) {
-				_, _ = query.WriteString("::")
-				_, _ = query.WriteString(usageLogInsertArgTypes[i])
-			}
 			argPos++
 		}
 		_, _ = query.WriteString(")")
