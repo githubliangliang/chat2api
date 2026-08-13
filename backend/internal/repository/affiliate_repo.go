@@ -43,7 +43,7 @@ LEFT JOIN (
 LEFT JOIN (
     SELECT user_id, COALESCE(SUM(amount), 0) AS matured_frozen_quota
     FROM user_affiliate_ledger
-    WHERE action = 'accrue' AND frozen_until IS NOT NULL AND frozen_until <= NOW()
+    WHERE action = 'accrue' AND frozen_until IS NOT NULL AND frozen_until <= CURRENT_TIMESTAMP
     GROUP BY user_id
 ) matured ON matured.user_id = ua.user_id
 WHERE ua.user_id = $1
@@ -86,7 +86,7 @@ func (r *affiliateRepository) BindInviter(ctx context.Context, userID, inviterID
 		}
 
 		res, err := txClient.ExecContext(txCtx,
-			"UPDATE user_affiliates SET inviter_id = $1, updated_at = NOW() WHERE user_id = $2 AND inviter_id IS NULL",
+			"UPDATE user_affiliates SET inviter_id = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2 AND inviter_id IS NULL",
 			inviterID, userID,
 		)
 		if err != nil {
@@ -99,7 +99,7 @@ func (r *affiliateRepository) BindInviter(ctx context.Context, userID, inviterID
 		}
 
 		if _, err = txClient.ExecContext(txCtx,
-			"UPDATE user_affiliates SET aff_count = aff_count + 1, updated_at = NOW() WHERE user_id = $1",
+			"UPDATE user_affiliates SET aff_count = aff_count + 1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $1",
 			inviterID,
 		); err != nil {
 			return fmt.Errorf("increment inviter aff_count: %w", err)
@@ -123,9 +123,9 @@ func (r *affiliateRepository) AccrueQuota(ctx context.Context, inviterID, invite
 		// freezeHours > 0: add to frozen quota; == 0: add to available quota directly
 		var updateSQL string
 		if freezeHours > 0 {
-			updateSQL = "UPDATE user_affiliates SET aff_frozen_quota = aff_frozen_quota + $1, aff_history_quota = aff_history_quota + $1, updated_at = NOW() WHERE user_id = $2"
+			updateSQL = "UPDATE user_affiliates SET aff_frozen_quota = aff_frozen_quota + $1, aff_history_quota = aff_history_quota + $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2"
 		} else {
-			updateSQL = "UPDATE user_affiliates SET aff_quota = aff_quota + $1, aff_history_quota = aff_history_quota + $1, updated_at = NOW() WHERE user_id = $2"
+			updateSQL = "UPDATE user_affiliates SET aff_quota = aff_quota + $1, aff_history_quota = aff_history_quota + $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2"
 		}
 		res, err := txClient.ExecContext(txCtx, updateSQL, amount, inviterID)
 		if err != nil {
@@ -138,16 +138,17 @@ func (r *affiliateRepository) AccrueQuota(ctx context.Context, inviterID, invite
 		}
 
 		if freezeHours > 0 {
+			frozenUntil := time.Now().UTC().Add(time.Duration(freezeHours) * time.Hour)
 			if _, err = txClient.ExecContext(txCtx, `
 INSERT INTO user_affiliate_ledger (user_id, action, amount, source_user_id, source_order_id, frozen_until, created_at, updated_at)
-VALUES ($1, 'accrue', $2, $3, $4, NOW() + make_interval(hours => $5), NOW(), NOW())`,
-				inviterID, amount, inviteeUserID, nullableInt64Arg(sourceOrderID), freezeHours); err != nil {
+VALUES ($1, 'accrue', $2, $3, $4, $5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+				inviterID, amount, inviteeUserID, nullableInt64Arg(sourceOrderID), frozenUntil); err != nil {
 				return fmt.Errorf("insert affiliate accrue ledger: %w", err)
 			}
 		} else {
 			if _, err = txClient.ExecContext(txCtx, `
 INSERT INTO user_affiliate_ledger (user_id, action, amount, source_user_id, source_order_id, created_at, updated_at)
-VALUES ($1, 'accrue', $2, $3, $4, NOW(), NOW())`, inviterID, amount, inviteeUserID, nullableInt64Arg(sourceOrderID)); err != nil {
+VALUES ($1, 'accrue', $2, $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`, inviterID, amount, inviteeUserID, nullableInt64Arg(sourceOrderID)); err != nil {
 				return fmt.Errorf("insert affiliate accrue ledger: %w", err)
 			}
 		}
@@ -192,15 +193,11 @@ func (r *affiliateRepository) ThawFrozenQuota(ctx context.Context, userID int64)
 // thawFrozenQuotaTx moves matured frozen quota to available quota within an existing tx.
 func thawFrozenQuotaTx(txCtx context.Context, txClient *dbent.Client, userID int64) (float64, error) {
 	rows, err := txClient.QueryContext(txCtx, `
-WITH matured AS (
-    UPDATE user_affiliate_ledger
-    SET frozen_until = NULL, updated_at = NOW()
-    WHERE user_id = $1
-      AND frozen_until IS NOT NULL
-      AND frozen_until <= NOW()
-    RETURNING amount
-)
-SELECT COALESCE(SUM(amount), 0) FROM matured`, userID)
+SELECT COALESCE(SUM(amount), 0)
+FROM user_affiliate_ledger
+WHERE user_id = $1
+  AND frozen_until IS NOT NULL
+  AND frozen_until <= CURRENT_TIMESTAMP`, userID)
 	if err != nil {
 		return 0, fmt.Errorf("thaw frozen quota: %w", err)
 	}
@@ -219,11 +216,20 @@ SELECT COALESCE(SUM(amount), 0) FROM matured`, userID)
 		return 0, nil
 	}
 
+	if _, err = txClient.ExecContext(txCtx, `
+UPDATE user_affiliate_ledger
+SET frozen_until = NULL, updated_at = CURRENT_TIMESTAMP
+WHERE user_id = $1
+  AND frozen_until IS NOT NULL
+  AND frozen_until <= CURRENT_TIMESTAMP`, userID); err != nil {
+		return 0, fmt.Errorf("mark affiliate ledger thawed: %w", err)
+	}
+
 	_, err = txClient.ExecContext(txCtx, `
 UPDATE user_affiliates
 SET aff_quota = aff_quota + $1,
-    aff_frozen_quota = GREATEST(aff_frozen_quota - $1, 0),
-    updated_at = NOW()
+    aff_frozen_quota = MAX(aff_frozen_quota - $1, 0),
+    updated_at = CURRENT_TIMESTAMP
 WHERE user_id = $2`, thawed, userID)
 	if err != nil {
 		return 0, fmt.Errorf("move thawed quota: %w", err)
@@ -316,7 +322,7 @@ INSERT INTO user_affiliate_ledger (
     created_at,
     updated_at
 )
-VALUES ($1, 'transfer', $2, NULL, $3, $4, $5, $6, NOW(), NOW())`,
+VALUES ($1, 'transfer', $2, NULL, $3, $4, $5, $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
 			userID,
 			transferred,
 			snapshot.BalanceAfter,
@@ -759,7 +765,7 @@ func ensureUserAffiliateWithClient(ctx context.Context, client affiliateQueryExe
 		}
 		_, insertErr := client.ExecContext(ctx, `
 INSERT INTO user_affiliates (user_id, aff_code, created_at, updated_at)
-VALUES ($1, $2, NOW(), NOW())
+VALUES ($1, $2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 ON CONFLICT (user_id) DO NOTHING`, userID, code)
 		if insertErr == nil {
 			break
@@ -987,7 +993,7 @@ func (r *affiliateRepository) UpdateUserAffCode(ctx context.Context, userID int6
 UPDATE user_affiliates
 SET aff_code = $1,
     aff_code_custom = true,
-    updated_at = NOW()
+    updated_at = CURRENT_TIMESTAMP
 WHERE user_id = $2`, code, userID)
 		if err != nil {
 			if isAffiliateUniqueViolation(err) {
@@ -1022,7 +1028,7 @@ func (r *affiliateRepository) ResetUserAffCode(ctx context.Context, userID int64
 UPDATE user_affiliates
 SET aff_code = $1,
     aff_code_custom = false,
-    updated_at = NOW()
+    updated_at = CURRENT_TIMESTAMP
 WHERE user_id = $2`, candidate, userID)
 			if err != nil {
 				if isAffiliateUniqueViolation(err) {
@@ -1059,7 +1065,7 @@ func (r *affiliateRepository) SetUserRebateRate(ctx context.Context, userID int6
 		res, err := txClient.ExecContext(txCtx, `
 UPDATE user_affiliates
 SET aff_rebate_rate_percent = $1,
-    updated_at = NOW()
+    updated_at = CURRENT_TIMESTAMP
 WHERE user_id = $2`, nullableArg(ratePercent), userID)
 		if err != nil {
 			return fmt.Errorf("set aff_rebate_rate_percent: %w", err)

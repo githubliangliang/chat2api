@@ -27,4 +27,19 @@ func TestApplyMigrationsFreshSQLiteDatabase(t *testing.T) {
 		require.NoError(t, err)
 		require.Equalf(t, 1, exists, "expected table %s", table)
 	}
+
+	for _, column := range []string{
+		"source_order_id",
+		"balance_after",
+		"aff_quota_after",
+		"aff_frozen_quota_after",
+		"aff_history_quota_after",
+	} {
+		var exists int
+		err := db.QueryRowContext(context.Background(), `
+			SELECT COUNT(*) FROM pragma_table_info('user_affiliate_ledger') WHERE name = $1
+		`, column).Scan(&exists)
+		require.NoError(t, err)
+		require.Equalf(t, 1, exists, "expected user_affiliate_ledger.%s", column)
+	}
 }
