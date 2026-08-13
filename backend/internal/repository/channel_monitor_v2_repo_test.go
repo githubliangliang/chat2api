@@ -98,17 +98,17 @@ func TestChannelMonitorV2WhereRejectsGroupFilterOutsideConfiguredScope(t *testin
 }
 
 func TestChannelMonitorV2ErrorAggregationCountsFinalUserErrorsOnly(t *testing.T) {
-	query := strings.ToLower(channelMonitorV2ErrorAggregationSQL)
+	query := strings.ToLower(channelMonitorV2ClassifyErrorsSQL)
 	require.Contains(t, query, "not current_error.is_count_tokens")
 	require.Contains(t, query, "error_type = 'cyber_policy'")
-	require.Contains(t, query, "distinct on")
+	require.Contains(t, query, "row_number() over")
 	require.Contains(t, query, "candidate_ids")
-	require.Contains(t, query, "where bucket_start >= $1 and bucket_start < $2")
-	require.Contains(t, query, "upstream_affected_requests")
-	require.Contains(t, query, "jsonb_array_length(upstream_errors) > 0")
+	require.Contains(t, query, "bucket_start >= $1 and bucket_start < $2")
+	require.Contains(t, query, "upstream_affected")
+	require.Contains(t, query, "json_array_length(current_error.upstream_errors) > 0")
 	// request_id dedup must be time-bounded (no full-history scan).
-	require.Contains(t, query, "interval '90 minutes'")
-	require.Contains(t, query, "current_error.created_at >= $1 - interval '90 minutes'")
+	require.Contains(t, query, "datetime($1, '-90 minutes')")
+	require.Contains(t, query, "current_error.created_at >= datetime($1, '-90 minutes')")
 }
 
 func TestChannelMonitorV2UsageSuccessExcludesCyberBillingRows(t *testing.T) {
@@ -151,7 +151,7 @@ func TestChannelMonitorV2TierRetentionPolicy(t *testing.T) {
 	require.Equal(t, 45*24*time.Hour, channelMonitorV2RetentionRollup12h)
 	require.Equal(t, 90*24*time.Hour, channelMonitorV2RetentionRollup1d)
 	require.Equal(t, channelMonitorV2RetentionRollup1d, channelMonitorV2MaxRetention())
-	require.Contains(t, channelMonitorV2WatermarkSQL, "INTERVAL '90 days'")
+	require.Contains(t, channelMonitorV2WatermarkSQL, "'-90 days'")
 
 	// Every fixed rollup second must appear with a retention rule.
 	wantSeconds := map[int]time.Duration{
@@ -192,7 +192,7 @@ func TestSameFixedRollupBucket(t *testing.T) {
 // Needles present in service.ClassifyChannelMonitorV2Error must appear in the
 // aggregation SQL CASE so rollup categories match drilldown classification.
 func TestChannelMonitorV2SQLTaxonomyContainsGoNeedles(t *testing.T) {
-	sql := channelMonitorV2ErrorAggregationSQL
+	sql := channelMonitorV2ClassifyErrorsSQL
 	needles := []string{
 		"blocked keyword",
 		"invalid_api_key",
@@ -356,6 +356,97 @@ func TestChannelMonitorV2LoadFactsBucketsOnSQLite(t *testing.T) {
 	require.Len(t, facts, 1)
 	require.Equal(t, int64(2), facts[0].Success)
 	require.Equal(t, start.Format(time.RFC3339Nano), facts[0].BucketStart)
+}
+
+func TestChannelMonitorV2RecomputeRangeRunsOnSQLite(t *testing.T) {
+	db := openChannelMonitorV2SQLite(t)
+	db.SetMaxOpenConns(1)
+	ctx := context.Background()
+	require.NoError(t, ApplyMigrations(ctx, db))
+
+	start := time.Now().UTC().Truncate(time.Minute).Add(-10 * time.Minute)
+	end := start.Add(10 * time.Minute)
+	_, err := db.ExecContext(ctx, `
+		INSERT INTO groups (id, name, platform) VALUES (10, 'OpenAI', 'openai');
+		INSERT INTO accounts (id, name, platform, type, credentials, extra) VALUES (20, 'upstream', 'openai', 'apikey', '{}', '{}');
+		INSERT INTO usage_logs (
+			id, user_id, api_key_id, account_id, group_id, request_id, requested_model, model,
+			input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
+			actual_cost, first_token_ms, duration_ms, request_type, created_at
+		) VALUES
+			(1, 30, 40, 20, 10, 'usage-1', 'gpt-5', 'gpt-5', 10, 20, 3, 4, 0.1, 75, 400, 0, $1),
+			(2, 30, 40, 20, 10, 'usage-2', 'gpt-5', 'gpt-5', 11, 21, 5, 6, 0.2, 80, 450, 0, $2);
+		INSERT INTO ops_error_logs (
+			id, request_id, user_id, group_id, platform, requested_model, model,
+			error_phase, error_type, error_owner, error_source, severity, status_code,
+			upstream_status_code, upstream_error_message, upstream_errors,
+			is_count_tokens, created_at
+		) VALUES
+			(1, 'failed-1', 30, 10, 'openai', 'gpt-5', 'gpt-5', 'upstream', 'internal', 'system', 'proxy', 'P1', 500, NULL, 'first failure', '[]', 0, $3),
+			(2, 'failed-1', 30, 10, 'openai', 'gpt-5', 'gpt-5', 'upstream', 'upstream', 'provider', 'upstream', 'P1', 504, 504, 'gateway timeout', '[{"code":"a"},{"code":"b"}]', 0, $4)
+	`, start.Add(time.Minute), start.Add(2*time.Minute), start.Add(3*time.Minute), start.Add(4*time.Minute))
+	require.NoError(t, err)
+
+	repo := &channelMonitorV2Repository{db: db}
+	require.NoError(t, repo.RecomputeRange(ctx, start, end))
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO channel_monitor_v2_metrics_1m (bucket_start, platform, group_id, model)
+		VALUES ($1, 'openai', 10, 'old-model')
+	`, start.Add(-channelMonitorV2RetentionMetrics1m-time.Hour))
+	require.NoError(t, err)
+	require.NoError(t, repo.RecomputeRange(ctx, start, end))
+	var oldFacts int
+	require.NoError(t, db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM channel_monitor_v2_metrics_1m WHERE model = 'old-model'
+	`).Scan(&oldFacts))
+	require.Equal(t, 1, oldFacts, "active backfill must retain old 1m facts until rollups are complete")
+
+	var success, errors, upstreamAffected, upstreamAttempts int64
+	require.NoError(t, db.QueryRowContext(ctx, `
+		SELECT SUM(success_requests), SUM(error_requests), SUM(upstream_affected_requests), SUM(upstream_attempt_count)
+		FROM channel_monitor_v2_metrics_1m
+	`).Scan(&success, &errors, &upstreamAffected, &upstreamAttempts))
+	require.Equal(t, int64(2), success)
+	require.Equal(t, int64(1), errors)
+	require.Equal(t, int64(1), upstreamAffected)
+	require.Equal(t, int64(2), upstreamAttempts)
+
+	var userSuccess, userErrors int64
+	require.NoError(t, db.QueryRowContext(ctx, `
+		SELECT SUM(success_requests), SUM(error_requests)
+		FROM channel_monitor_v2_user_metrics_1m WHERE user_id = 30
+	`).Scan(&userSuccess, &userErrors))
+	require.Equal(t, int64(2), userSuccess)
+	require.Equal(t, int64(1), userErrors)
+
+	var timeoutErrors int64
+	require.NoError(t, db.QueryRowContext(ctx, `
+		SELECT SUM(error_requests) FROM channel_monitor_v2_error_metrics_1m WHERE error_category = 'timeout'
+	`).Scan(&timeoutErrors))
+	require.Equal(t, int64(1), timeoutErrors)
+
+	var globalTTFT, userTTFT int64
+	require.NoError(t, db.QueryRowContext(ctx, `
+		SELECT COALESCE(SUM(CASE WHEN user_id = 0 THEN sample_count ELSE 0 END), 0),
+		       COALESCE(SUM(CASE WHEN user_id = 30 THEN sample_count ELSE 0 END), 0)
+		FROM channel_monitor_v2_latency_histograms_1m WHERE metric = 'ttft'
+	`).Scan(&globalTTFT, &userTTFT))
+	require.Equal(t, int64(2), globalTTFT)
+	require.Equal(t, int64(2), userTTFT)
+
+	var rollupSuccess, rollupErrors int64
+	require.NoError(t, db.QueryRowContext(ctx, `
+		SELECT SUM(success_requests), SUM(error_requests)
+		FROM channel_monitor_v2_metrics_rollup WHERE bucket_seconds = 300
+	`).Scan(&rollupSuccess, &rollupErrors))
+	require.Equal(t, int64(2), rollupSuccess)
+	require.Equal(t, int64(1), rollupErrors)
+
+	var dataThroughEpoch, wantEpoch int64
+	require.NoError(t, db.QueryRowContext(ctx, `
+		SELECT unixepoch(data_through), unixepoch($1) FROM channel_monitor_v2_watermarks WHERE id = 1
+	`, end).Scan(&dataThroughEpoch, &wantEpoch))
+	require.Equal(t, wantEpoch, dataThroughEpoch)
 }
 
 func TestChannelMonitorV2LoadErrorDetailsRunsOnSQLite(t *testing.T) {
