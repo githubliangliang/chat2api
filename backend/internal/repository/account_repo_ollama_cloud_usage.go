@@ -2,33 +2,33 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/service"
-	"github.com/lib/pq"
-
-	"entgo.io/ent/dialect"
 )
 
-const (
-	ollamaCloudBaseURLRegexSQL       = `^[hH][tT][tT][pP][sS]://([wW][wW][wW]\.)?[oO][lL][lL][aA][mM][aA]\.[cC][oO][mM](:443)?(/v1)?$`
-	ollamaCloudBaseURLMatchSQLPrefix = "btrim("
-	ollamaCloudBaseURLMatchSQLSuffix = ") ~ '" + ollamaCloudBaseURLRegexSQL + "'"
-	ollamaCloudUsageEligibleSQL      = `
+const ollamaCloudBaseURLRegexSQL = `^[hH][tT][tT][pP][sS]://([wW][wW][wW]\.)?[oO][lL][lL][aA][mM][aA]\.[cC][oO][mM](:443)?(/v1)?$`
+
+const ollamaCloudUsageEligibleSQL = `
 	platform IN ('openai', 'anthropic')
 	AND type = 'apikey'
-	AND ` + ollamaCloudBaseURLMatchSQLPrefix + `credentials ->> 'base_url'` + ollamaCloudBaseURLMatchSQLSuffix + `
-	AND jsonb_typeof(credentials -> 'api_key') = 'string'
+	AND lower(trim(json_extract(credentials, '$.base_url'))) IN (
+		'https://ollama.com', 'https://ollama.com/v1', 'https://ollama.com:443',
+		'https://ollama.com:443/v1', 'https://www.ollama.com', 'https://www.ollama.com/v1',
+		'https://www.ollama.com:443', 'https://www.ollama.com:443/v1'
+	)
+	AND json_type(credentials, '$.api_key') = 'text'
 `
-)
 
 func ollamaCloudBaseURLMatchesSQL(expression string) string {
-	return ollamaCloudBaseURLMatchSQLPrefix + expression + ollamaCloudBaseURLMatchSQLSuffix
+	return "lower(trim(" + expression + ")) IN ('https://ollama.com', 'https://ollama.com/v1', 'https://ollama.com:443', 'https://ollama.com:443/v1', 'https://www.ollama.com', 'https://www.ollama.com/v1', 'https://www.ollama.com:443', 'https://www.ollama.com:443/v1')"
 }
 
 // ListOllamaCloudUsageGroupAccounts resolves every sibling for all supplied
@@ -57,36 +57,20 @@ func (r *accountRepository) ListOllamaCloudUsageGroupAccounts(ctx context.Contex
 	if len(keys) == 0 {
 		return []service.Account{}, nil
 	}
-	eligibleSQL := ollamaCloudUsageEligibleSQL
-	if r.client != nil && r.client.Driver().Dialect() == dialect.SQLite {
-		// SQLite JSON1 has no PostgreSQL regex/jsonb operators. The service only
-		// accepts these canonical Ollama hosts, so compare normalized URL values.
-		eligibleSQL = `
-	platform IN ('openai', 'anthropic')
-	AND type = 'apikey'
-	AND lower(trim(json_extract(credentials, '$.base_url'))) IN (
-		'https://ollama.com', 'https://ollama.com/v1', 'https://ollama.com:443',
-		'https://ollama.com:443/v1', 'https://www.ollama.com', 'https://www.ollama.com/v1',
-		'https://www.ollama.com:443', 'https://www.ollama.com:443/v1'
-	)
-	AND json_type(credentials, '$.api_key') = 'text'
-`
+	placeholders := make([]string, len(keys))
+	args := make([]any, len(keys))
+	for i, key := range keys {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+		args[i] = key
 	}
 	query := `
 		SELECT id
 		FROM accounts
 		WHERE deleted_at IS NULL
-		AND `+eligibleSQL+`
-			AND credentials ->> 'api_key' = ANY($1)
+		AND ` + ollamaCloudUsageEligibleSQL + `
+			AND json_extract(credentials, '$.api_key') IN (` + strings.Join(placeholders, ",") + `)
 		ORDER BY id
 	`
-	args := []any{pq.Array(keys)}
-	if r.client != nil && r.client.Driver().Dialect() == dialect.SQLite {
-		placeholders := make([]string, len(keys))
-		args = make([]any, len(keys))
-		for i, key := range keys { placeholders[i] = fmt.Sprintf("$%d", i+1); args[i] = key }
-		query = strings.Replace(query, "credentials ->> 'api_key' = ANY($1)", "credentials ->> 'api_key' IN ("+strings.Join(placeholders, ",")+")", 1)
-	}
 	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -257,35 +241,21 @@ func (r *accountRepository) updateOllamaCloudUsageGroup(
 				return service.ErrOllamaCloudUsageIdentityChanged
 			}
 		}
-		encoded, err := json.Marshal(payload)
-		if err != nil {
-			return err
-		}
-		memberIDs := make([]int64, len(members))
-		for index := range members {
-			memberIDs[index] = members[index].id
-		}
-		result, err := client.ExecContext(txCtx, `
-			UPDATE accounts
-			SET extra = (COALESCE(extra, '{}'::jsonb)
-					- 'ollama_cloud_usage_session'
-					- 'ollama_cloud_usage_auto_refresh'
-					- 'ollama_cloud_usage_snapshot') || $1::jsonb,
-				updated_at = NOW()
-			WHERE deleted_at IS NULL
-				AND `+ollamaCloudUsageEligibleSQL+`
-				AND credentials ->> 'api_key' = $2
-				AND id = ANY($3)
-		`, string(encoded), apiKey, pq.Array(memberIDs))
-		if err != nil {
-			return err
-		}
-		affected, err := result.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if affected != int64(len(members)) {
-			return service.ErrOllamaCloudUsageIdentityChanged
+		for _, member := range members {
+			current, err := client.Account.Get(txCtx, member.id)
+			if err != nil {
+				return service.ErrOllamaCloudUsageIdentityChanged
+			}
+			extra := normalizeJSONMap(current.Extra)
+			delete(extra, service.OllamaCloudUsageSessionExtraKey)
+			delete(extra, service.OllamaCloudUsageAutoRefreshExtraKey)
+			delete(extra, service.OllamaCloudUsageSnapshotExtraKey)
+			for key, value := range payload {
+				extra[key] = value
+			}
+			if _, err := client.Account.UpdateOneID(member.id).SetExtra(extra).Save(txCtx); err != nil {
+				return err
+			}
 		}
 		return nil
 	}
@@ -327,17 +297,16 @@ func lockOllamaCloudUsageGroup(
 			id = $2
 				AND platform = $3
 				AND type = $4
-				AND credentials = $5::jsonb
-				AND proxy_id IS NOT DISTINCT FROM $6,
-			COALESCE((extra -> 'ollama_cloud_usage_session')::text, 'null'),
-			COALESCE((extra -> 'ollama_cloud_usage_auto_refresh')::text, 'null'),
-			COALESCE((extra -> 'ollama_cloud_usage_snapshot')::text, 'null')
+				AND json(credentials) = json($5)
+				AND proxy_id IS $6,
+			COALESCE(extra -> '$.ollama_cloud_usage_session', 'null'),
+			COALESCE(extra -> '$.ollama_cloud_usage_auto_refresh', 'null'),
+			COALESCE(extra -> '$.ollama_cloud_usage_snapshot', 'null')
 		FROM accounts
 		WHERE deleted_at IS NULL
 			AND `+ollamaCloudUsageEligibleSQL+`
-			AND credentials ->> 'api_key' = $1
+			AND json_extract(credentials, '$.api_key') = $1
 		ORDER BY id
-		FOR NO KEY UPDATE
 	`, apiKey, account.ID, account.Platform, account.Type, string(credentials), proxyID)
 	if err != nil {
 		return nil, err
@@ -384,41 +353,6 @@ func canonicalJSON(raw string) string {
 	return string(encoded)
 }
 
-// ollamaCloudUsageParseRFC3339SQL reuses the verified RFC3339(/Nano) parse path
-// for a snapshot timestamp expression. Invalid or missing values fail open to NULL.
-//
-// The value is rewritten twice before it reaches jsonpath:
-//  1. Sub-second precision beyond 6 digits is truncated, because .datetime()
-//     rejects more than microsecond resolution while Go emits 9 digits.
-//  2. A trailing "Z" is rewritten to "+00:00". jsonpath .datetime() only learned
-//     to accept the ISO-8601 "Z" designator in PostgreSQL 17, and every timestamp
-//     this service writes is UTC (hence "Z"). Without this rewrite the parse
-//     silently yields NULL on PostgreSQL <= 16, which makes every due column NULL
-//     and collapses ListDueOllamaCloudUsageAccounts into its fail-open branch.
-//
-// jsonpath (rather than a direct ::timestamptz cast) is required so that values
-// passing the shape regex but naming an impossible date (e.g. 2026-02-30) fail
-// open to NULL instead of aborting the whole query.
-func ollamaCloudUsageParseRFC3339SQL(expression string) string {
-	return `CASE
-		WHEN ` + expression + ` IS NULL THEN NULL
-		WHEN ` + expression + ` ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$'
-			THEN jsonb_path_query_first_tz(
-				to_jsonb(regexp_replace(
-					regexp_replace(
-						` + expression + `,
-						'(\.[0-9]{6})[0-9]+(Z|[+-][0-9]{2}:[0-9]{2})$',
-						'\1\2'
-					),
-					'Z$',
-					'+00:00'
-				)),
-				'$.datetime()', '{}'::jsonb, true
-			) #>> '{}'
-		ELSE NULL
-	END`
-}
-
 // ListDueOllamaCloudUsageAccounts returns at most one truly-due activity-driven
 // candidate per exact API key. Due timing (debounce, max-wait, failure backoff)
 // is evaluated in SQL before LIMIT so non-due active groups cannot starve due ones.
@@ -449,120 +383,85 @@ func (r *accountRepository) ListDueOllamaCloudUsageAccounts(
 	if maxWait <= 0 {
 		maxWait = time.Hour
 	}
-	debounceSeconds := debounce.Seconds()
-	maxWaitSeconds := maxWait.Seconds()
-	minFetchIntervalSeconds := service.OllamaCloudUsageMinFetchInterval.Seconds()
 	rows, err := r.sql.QueryContext(ctx, `
-		WITH eligible AS (
-			SELECT id,
-				credentials ->> 'api_key' AS api_key,
-				last_used_at,
-				extra -> 'ollama_cloud_usage_snapshot' AS snapshot
-			FROM accounts
-			WHERE deleted_at IS NULL
-				AND status = 'active'
-				AND `+ollamaCloudUsageEligibleSQL+`
-				AND jsonb_typeof(extra -> 'ollama_cloud_usage_session') = 'string'
-				AND extra @> '{"ollama_cloud_usage_auto_refresh": true}'::jsonb
-		), group_activity AS (
-			SELECT credentials ->> 'api_key' AS api_key,
-				MAX(last_used_at) AS group_last_used_at
-			FROM accounts
-			WHERE deleted_at IS NULL
-				AND `+ollamaCloudUsageEligibleSQL+`
-				AND jsonb_typeof(credentials -> 'api_key') = 'string'
-			GROUP BY credentials ->> 'api_key'
-		), joined AS (
-			SELECT e.id, e.api_key, e.snapshot, g.group_last_used_at,
-				e.snapshot #>> '{status}' AS status,
-				e.snapshot #>> '{fetched_at}' AS fetched_at,
-				e.snapshot #>> '{last_attempt_at}' AS last_attempt_at,
-				e.snapshot #>> '{next_refresh_at}' AS next_refresh_at
-			FROM eligible e
-			JOIN group_activity g ON g.api_key = e.api_key
-		), parsed AS MATERIALIZED (
-			SELECT id, api_key, snapshot, group_last_used_at, status,
-				`+ollamaCloudUsageParseRFC3339SQL("fetched_at")+` AS parsed_fetched_at,
-				`+ollamaCloudUsageParseRFC3339SQL("last_attempt_at")+` AS parsed_last_attempt_at,
-				`+ollamaCloudUsageParseRFC3339SQL("next_refresh_at")+` AS parsed_next_refresh_at
-			FROM joined
-		), timed AS (
-			SELECT *,
-				CASE
-					WHEN status = 'ok'
-						AND parsed_fetched_at IS NOT NULL
-						AND group_last_used_at IS NOT NULL
-						AND group_last_used_at > parsed_fetched_at::timestamptz
-					THEN GREATEST(
-						LEAST(
-							group_last_used_at + make_interval(secs => $2::double precision),
-							parsed_fetched_at::timestamptz + make_interval(secs => $3::double precision)
-						),
-						parsed_fetched_at::timestamptz + make_interval(secs => $5::double precision)
-					)
-					WHEN status IN ('failed', 'unauthorized')
-						AND parsed_last_attempt_at IS NOT NULL
-						AND group_last_used_at IS NOT NULL
-						AND group_last_used_at > parsed_last_attempt_at::timestamptz
-					THEN GREATEST(
-						LEAST(
-							group_last_used_at + make_interval(secs => $2::double precision),
-							parsed_last_attempt_at::timestamptz + make_interval(secs => $3::double precision)
-						),
-						COALESCE(parsed_next_refresh_at::timestamptz, '-infinity'::timestamptz)
-					)
-					ELSE NULL
-				END AS activity_due_at
-			FROM parsed
-		), candidates AS (
-			SELECT *,
-				CASE
-					WHEN snapshot IS NULL OR snapshot = 'null'::jsonb OR status IS NULL
-						OR status NOT IN ('ok', 'failed', 'unauthorized') THEN 0
-					WHEN status = 'ok' AND parsed_fetched_at IS NULL THEN 0
-					WHEN status IN ('failed', 'unauthorized') AND parsed_last_attempt_at IS NULL THEN 0
-					WHEN activity_due_at IS NOT NULL AND $1 >= activity_due_at THEN 1
-					ELSE NULL
-				END AS due_class,
-				activity_due_at AS due_at
-			FROM timed
-		), ranked AS (
-			SELECT id, api_key, group_last_used_at, due_class, due_at,
-				row_number() OVER (
-					PARTITION BY api_key
-					ORDER BY due_class,
-						due_at NULLS FIRST,
-						id
-				) AS group_rank
-			FROM candidates
-			WHERE due_class IS NOT NULL
-		)
-		SELECT id, group_last_used_at
-		FROM ranked
-		WHERE group_rank = 1
-		ORDER BY due_class, due_at NULLS FIRST, id
-		LIMIT $4
-	`, now.UTC(), debounceSeconds, maxWaitSeconds, limit, minFetchIntervalSeconds)
+		SELECT a.id,
+			json_extract(a.credentials, '$.api_key'),
+			(SELECT MAX(b.last_used_at)
+			 FROM accounts b
+			 WHERE b.deleted_at IS NULL
+			   AND json_extract(b.credentials, '$.api_key') = json_extract(a.credentials, '$.api_key')),
+			json_extract(a.extra, '$.ollama_cloud_usage_snapshot')
+		FROM accounts a
+		WHERE a.deleted_at IS NULL
+			AND a.status = 'active'
+			AND a.platform IN ('openai', 'anthropic')
+			AND a.type = 'apikey'
+			AND lower(trim(json_extract(a.credentials, '$.base_url'))) IN (
+				'https://ollama.com', 'https://ollama.com/v1', 'https://ollama.com:443',
+				'https://ollama.com:443/v1', 'https://www.ollama.com', 'https://www.ollama.com/v1',
+				'https://www.ollama.com:443', 'https://www.ollama.com:443/v1')
+			AND json_type(a.credentials, '$.api_key') = 'text'
+			AND json_type(a.extra, '$.ollama_cloud_usage_session') = 'text'
+			AND json_extract(a.extra, '$.ollama_cloud_usage_auto_refresh') = 1
+		ORDER BY a.id
+	`)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 	type dueRow struct {
 		id            int64
+		apiKey        string
 		groupLastUsed *time.Time
+		dueClass      int
+		dueAt         time.Time
 	}
 	rowsOut := make([]dueRow, 0, limit)
-	ids := make([]int64, 0, limit)
 	for rows.Next() {
 		var row dueRow
-		if err := rows.Scan(&row.id, &row.groupLastUsed); err != nil {
+		var groupLastUsed sql.NullString
+		var snapshotJSON sql.NullString
+		if err := rows.Scan(&row.id, &row.apiKey, &groupLastUsed, &snapshotJSON); err != nil {
 			return nil, err
 		}
+		if groupLastUsed.Valid {
+			if timestamp, ok := parseSQLiteTimestamp(groupLastUsed.String); ok {
+				row.groupLastUsed = &timestamp
+			}
+		}
+		row.dueAt, row.dueClass, _ = ollamaCloudUsageRepositoryDueAt(snapshotJSON, row.groupLastUsed, debounce, maxWait)
+		if row.dueClass < 0 || now.Before(row.dueAt) {
+			continue
+		}
 		rowsOut = append(rowsOut, row)
-		ids = append(ids, row.id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+	sort.Slice(rowsOut, func(i, j int) bool {
+		if rowsOut[i].dueClass != rowsOut[j].dueClass {
+			return rowsOut[i].dueClass < rowsOut[j].dueClass
+		}
+		if !rowsOut[i].dueAt.Equal(rowsOut[j].dueAt) {
+			return rowsOut[i].dueAt.Before(rowsOut[j].dueAt)
+		}
+		return rowsOut[i].id < rowsOut[j].id
+	})
+	groupSeen := make(map[string]struct{}, len(rowsOut))
+	selected := rowsOut[:0]
+	for _, row := range rowsOut {
+		if _, exists := groupSeen[row.apiKey]; exists {
+			continue
+		}
+		groupSeen[row.apiKey] = struct{}{}
+		selected = append(selected, row)
+		if len(selected) == limit {
+			break
+		}
+	}
+	ids := make([]int64, len(selected))
+	for index := range selected {
+		ids[index] = selected[index].id
 	}
 	accounts, err := r.GetByIDs(ctx, ids)
 	if err != nil {
@@ -575,7 +474,7 @@ func (r *accountRepository) ListDueOllamaCloudUsageAccounts(
 		}
 	}
 	result := make([]service.Account, 0, len(rowsOut))
-	for _, row := range rowsOut {
+	for _, row := range selected {
 		account := byID[row.id]
 		if account == nil {
 			continue
@@ -590,4 +489,60 @@ func (r *accountRepository) ListDueOllamaCloudUsageAccounts(
 		result = append(result, *account)
 	}
 	return result, nil
+}
+
+func parseSQLiteTimestamp(raw string) (time.Time, bool) {
+	for _, layout := range []string{time.RFC3339Nano, "2006-01-02 15:04:05.999999999 -0700 MST", "2006-01-02 15:04:05.999999999-07:00", "2006-01-02 15:04:05.999999999"} {
+		if parsed, err := time.Parse(layout, raw); err == nil {
+			return parsed.UTC(), true
+		}
+	}
+	return time.Time{}, false
+}
+
+func ollamaCloudUsageRepositoryDueAt(snapshotJSON sql.NullString, groupLastUsed *time.Time, debounce, maxWait time.Duration) (time.Time, int, bool) {
+	if !snapshotJSON.Valid || strings.TrimSpace(snapshotJSON.String) == "" || snapshotJSON.String == "null" {
+		return time.Time{}, 0, true
+	}
+	var snapshot service.OllamaCloudUsageSnapshot
+	if err := json.Unmarshal([]byte(snapshotJSON.String), &snapshot); err != nil {
+		return time.Time{}, 0, true
+	}
+	switch snapshot.Status {
+	case service.OllamaCloudUsageStatusOK:
+		if snapshot.FetchedAt == nil || snapshot.FetchedAt.IsZero() {
+			return time.Time{}, 0, true
+		}
+		fetched := snapshot.FetchedAt.UTC()
+		if groupLastUsed == nil || !groupLastUsed.After(fetched) {
+			return time.Time{}, -1, false
+		}
+		dueAt := minOllamaCloudUsageTime(groupLastUsed.Add(debounce), fetched.Add(maxWait))
+		if floor := fetched.Add(service.OllamaCloudUsageMinFetchInterval); dueAt.Before(floor) {
+			dueAt = floor
+		}
+		return dueAt, 1, true
+	case service.OllamaCloudUsageStatusFailed, service.OllamaCloudUsageStatusUnauthorized:
+		if snapshot.LastAttemptAt.IsZero() {
+			return time.Time{}, 0, true
+		}
+		attempted := snapshot.LastAttemptAt.UTC()
+		if groupLastUsed == nil || !groupLastUsed.After(attempted) {
+			return time.Time{}, -1, false
+		}
+		dueAt := minOllamaCloudUsageTime(groupLastUsed.Add(debounce), attempted.Add(maxWait))
+		if !snapshot.NextRefreshAt.IsZero() && snapshot.NextRefreshAt.After(dueAt) {
+			dueAt = snapshot.NextRefreshAt.UTC()
+		}
+		return dueAt, 1, true
+	default:
+		return time.Time{}, 0, true
+	}
+}
+
+func minOllamaCloudUsageTime(left, right time.Time) time.Time {
+	if left.Before(right) {
+		return left
+	}
+	return right
 }
