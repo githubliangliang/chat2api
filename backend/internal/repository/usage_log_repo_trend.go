@@ -39,9 +39,13 @@ func sqliteUsageDateFormat(granularity string) string {
 	}
 }
 
+func sqliteUsageDateExpr(column, granularity string) string {
+	return fmt.Sprintf("strftime('%s', %s)", sqliteUsageDateFormat(granularity), sqliteNormalizedTimestampExpr(column))
+}
+
 // GetAPIKeyUsageTrend returns usage trend data grouped by API key and date
 func (r *usageLogRepository) GetAPIKeyUsageTrend(ctx context.Context, startTime, endTime time.Time, granularity string, limit int) (results []APIKeyUsageTrendPoint, err error) {
-	dateFormat := sqliteUsageDateFormat(granularity)
+	dateExpr := sqliteUsageDateExpr("u.created_at", granularity)
 
 	query := fmt.Sprintf(`
 		WITH top_keys AS (
@@ -53,7 +57,7 @@ func (r *usageLogRepository) GetAPIKeyUsageTrend(ctx context.Context, startTime,
 			LIMIT $3
 		)
 		SELECT
-			strftime('%s', u.created_at) as date,
+			%s as date,
 			u.api_key_id,
 			COALESCE(k.name, '') as key_name,
 			COUNT(*) as requests,
@@ -62,9 +66,10 @@ func (r *usageLogRepository) GetAPIKeyUsageTrend(ctx context.Context, startTime,
 		LEFT JOIN api_keys k ON u.api_key_id = k.id
 		WHERE u.api_key_id IN (SELECT api_key_id FROM top_keys)
 		  AND u.created_at >= $4 AND u.created_at < $5
+		  AND %s IS NOT NULL
 		GROUP BY date, u.api_key_id, k.name
 		ORDER BY date ASC, tokens DESC
-	`, dateFormat)
+	`, dateExpr, dateExpr)
 
 	rows, err := r.sql.QueryContext(ctx, query, startTime, endTime, limit, startTime, endTime)
 	if err != nil {
@@ -96,7 +101,7 @@ func (r *usageLogRepository) GetAPIKeyUsageTrend(ctx context.Context, startTime,
 
 // GetUserUsageTrend returns usage trend data grouped by user and date
 func (r *usageLogRepository) GetUserUsageTrend(ctx context.Context, startTime, endTime time.Time, granularity string, limit int) (results []UserUsageTrendPoint, err error) {
-	dateFormat := sqliteUsageDateFormat(granularity)
+	dateExpr := sqliteUsageDateExpr("u.created_at", granularity)
 
 	query := fmt.Sprintf(`
 		WITH top_users AS (
@@ -108,7 +113,7 @@ func (r *usageLogRepository) GetUserUsageTrend(ctx context.Context, startTime, e
 			LIMIT $3
 		)
 		SELECT
-			strftime('%s', u.created_at) as date,
+			%s as date,
 			u.user_id,
 			COALESCE(us.email, '') as email,
 			COALESCE(us.username, '') as username,
@@ -120,9 +125,10 @@ func (r *usageLogRepository) GetUserUsageTrend(ctx context.Context, startTime, e
 		LEFT JOIN users us ON u.user_id = us.id
 		WHERE u.user_id IN (SELECT user_id FROM top_users)
 		  AND u.created_at >= $4 AND u.created_at < $5
+		  AND %s IS NOT NULL
 		GROUP BY date, u.user_id, us.email, us.username
 		ORDER BY date ASC, tokens DESC
-	`, dateFormat)
+	`, dateExpr, dateExpr)
 
 	rows, err := r.sql.QueryContext(ctx, query, startTime, endTime, limit, startTime, endTime)
 	if err != nil {
@@ -237,11 +243,11 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 
 // GetUserUsageTrendByUserID 获取指定用户的使用趋势
 func (r *usageLogRepository) GetUserUsageTrendByUserID(ctx context.Context, userID int64, startTime, endTime time.Time, granularity string) (results []TrendDataPoint, err error) {
-	dateFormat := sqliteUsageDateFormat(granularity)
+	dateExpr := sqliteUsageDateExpr("created_at", granularity)
 
 	query := fmt.Sprintf(`
 		SELECT
-			strftime('%s', created_at) as date,
+			%s as date,
 			COUNT(*) as requests,
 			COALESCE(SUM(input_tokens), 0) as input_tokens,
 			COALESCE(SUM(output_tokens), 0) as output_tokens,
@@ -252,9 +258,10 @@ func (r *usageLogRepository) GetUserUsageTrendByUserID(ctx context.Context, user
 			COALESCE(SUM(actual_cost), 0) as actual_cost
 		FROM usage_logs
 		WHERE user_id = $1 AND created_at >= $2 AND created_at < $3
+		  AND %s IS NOT NULL
 		GROUP BY date
 		ORDER BY date ASC
-	`, dateFormat)
+	`, dateExpr, dateExpr)
 
 	rows, err := r.sql.QueryContext(ctx, query, userID, startTime, endTime)
 	if err != nil {
@@ -298,11 +305,11 @@ func (r *usageLogRepository) getUsageTrendWithFilters(ctx context.Context, start
 		}
 	}
 
-	dateFormat := sqliteUsageDateFormat(granularity)
+	dateExpr := sqliteUsageDateExpr("created_at", granularity)
 
 	query := fmt.Sprintf(`
 		SELECT
-			strftime('%s', created_at) as date,
+			%s as date,
 			COUNT(*) as requests,
 			COALESCE(SUM(input_tokens), 0) as input_tokens,
 			COALESCE(SUM(output_tokens), 0) as output_tokens,
@@ -313,7 +320,8 @@ func (r *usageLogRepository) getUsageTrendWithFilters(ctx context.Context, start
 			COALESCE(SUM(actual_cost), 0) as actual_cost
 		FROM usage_logs
 		WHERE created_at >= $1 AND created_at < $2
-	`, dateFormat)
+		  AND %s IS NOT NULL
+	`, dateExpr, dateExpr)
 
 	args := []any{startTime, endTime}
 	if userID > 0 {
@@ -381,15 +389,15 @@ func shouldUsePreaggregatedTrend(granularity string, userID, apiKeyID, accountID
 }
 
 func (r *usageLogRepository) getUsageTrendFromAggregates(ctx context.Context, startTime, endTime time.Time, granularity string) (results []TrendDataPoint, err error) {
-	dateFormat := sqliteUsageDateFormat(granularity)
 	query := ""
 	args := []any{startTime, endTime}
 
 	switch granularity {
 	case "hour":
+		dateExpr := sqliteUsageDateExpr("bucket_start", granularity)
 		query = fmt.Sprintf(`
 			SELECT
-				strftime('%s', bucket_start) as date,
+				%s as date,
 				total_requests as requests,
 				input_tokens,
 				output_tokens,
@@ -400,12 +408,14 @@ func (r *usageLogRepository) getUsageTrendFromAggregates(ctx context.Context, st
 				actual_cost
 			FROM usage_dashboard_hourly
 			WHERE bucket_start >= $1 AND bucket_start < $2
+			  AND %s IS NOT NULL
 			ORDER BY bucket_start ASC
-		`, dateFormat)
+		`, dateExpr, dateExpr)
 	case "day":
+		dateExpr := sqliteUsageDateExpr("bucket_date", granularity)
 		query = fmt.Sprintf(`
 			SELECT
-				strftime('%s', bucket_date) as date,
+				%s as date,
 				total_requests as requests,
 				input_tokens,
 				output_tokens,
@@ -416,8 +426,9 @@ func (r *usageLogRepository) getUsageTrendFromAggregates(ctx context.Context, st
 				actual_cost
 			FROM usage_dashboard_daily
 			WHERE bucket_date >= date($1) AND bucket_date < date($2)
+			  AND %s IS NOT NULL
 			ORDER BY bucket_date ASC
-		`, dateFormat)
+		`, dateExpr, dateExpr)
 	default:
 		return nil, nil
 	}

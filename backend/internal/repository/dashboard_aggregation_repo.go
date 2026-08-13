@@ -154,13 +154,17 @@ func (r *dashboardAggregationRepository) recomputeRangeInTx(ctx context.Context,
 }
 
 func (r *dashboardAggregationRepository) GetAggregationWatermark(ctx context.Context) (time.Time, error) {
-	var ts time.Time
+	var raw any
 	query := "SELECT last_aggregated_at FROM usage_dashboard_aggregation_watermark WHERE id = 1"
-	if err := scanSingleRow(ctx, r.sql, query, nil, &ts); err != nil {
+	if err := scanSingleRow(ctx, r.sql, query, nil, &raw); err != nil {
 		if err == sql.ErrNoRows {
 			return time.Unix(0, 0).UTC(), nil
 		}
 		return time.Time{}, err
+	}
+	ts, ok := parseSQLiteTime(raw)
+	if !ok {
+		return time.Time{}, fmt.Errorf("invalid aggregation watermark %q", raw)
 	}
 	return ts.UTC(), nil
 }
@@ -168,7 +172,7 @@ func (r *dashboardAggregationRepository) GetAggregationWatermark(ctx context.Con
 func (r *dashboardAggregationRepository) UpdateAggregationWatermark(ctx context.Context, aggregatedAt time.Time) error {
 	query := `
 		INSERT INTO usage_dashboard_aggregation_watermark (id, last_aggregated_at, updated_at)
-		VALUES (1, $1, NOW())
+		VALUES (1, $1, datetime('now'))
 		ON CONFLICT (id)
 		DO UPDATE SET last_aggregated_at = EXCLUDED.last_aggregated_at, updated_at = EXCLUDED.updated_at
 	`
@@ -273,15 +277,20 @@ func (r *dashboardAggregationRepository) EnsureUsageLogsPartitions(ctx context.C
 }
 
 func (r *dashboardAggregationRepository) insertHourlyActiveUsers(ctx context.Context, start, end time.Time) error {
-	query := `
+	query := fmt.Sprintf(`
+		WITH normalized AS (
+			SELECT user_id, %s AS created_at
+			FROM usage_logs
+		)
 		INSERT INTO usage_dashboard_hourly_users (bucket_start, user_id)
 		SELECT DISTINCT
-			datetime(strftime('%Y-%m-%d %H:00:00', created_at)) AS bucket_start,
+			datetime(strftime('%%Y-%%m-%%d %%H:00:00', created_at)) AS bucket_start,
 			user_id
-		FROM usage_logs
-		WHERE created_at >= $1 AND created_at < $2
+		FROM normalized
+		WHERE created_at IS NOT NULL
+		  AND created_at >= %s AND created_at < %s
 		ON CONFLICT DO NOTHING
-	`
+	`, sqliteNormalizedTimestampExpr("created_at"), sqliteNormalizedTimestampExpr("$1"), sqliteNormalizedTimestampExpr("$2"))
 	_, err := r.sql.ExecContext(ctx, query, start, end)
 	return err
 }
@@ -301,10 +310,14 @@ func (r *dashboardAggregationRepository) insertDailyActiveUsers(ctx context.Cont
 }
 
 func (r *dashboardAggregationRepository) upsertHourlyAggregates(ctx context.Context, start, end time.Time) error {
-	query := `
-		WITH hourly AS (
+	query := fmt.Sprintf(`
+		WITH normalized AS (
+			SELECT *, %s AS normalized_created_at
+			FROM usage_logs
+		),
+		hourly AS (
 			SELECT
-				datetime(strftime('%Y-%m-%d %H:00:00', created_at)) AS bucket_start,
+				datetime(strftime('%%Y-%%m-%%d %%H:00:00', normalized_created_at)) AS bucket_start,
 				COUNT(*) AS total_requests,
 				COALESCE(SUM(input_tokens), 0) AS input_tokens,
 				COALESCE(SUM(output_tokens), 0) AS output_tokens,
@@ -314,8 +327,9 @@ func (r *dashboardAggregationRepository) upsertHourlyAggregates(ctx context.Cont
 				COALESCE(SUM(actual_cost), 0) AS actual_cost,
 				COALESCE(SUM(COALESCE(account_stats_cost, total_cost) * COALESCE(account_rate_multiplier, 1)), 0) AS account_cost,
 				COALESCE(SUM(COALESCE(duration_ms, 0)), 0) AS total_duration_ms
-			FROM usage_logs
-			WHERE created_at >= $1 AND created_at < $2
+			FROM normalized
+			WHERE normalized_created_at IS NOT NULL
+			  AND normalized_created_at >= %s AND normalized_created_at < %s
 			GROUP BY 1
 		),
 		user_counts AS (
@@ -350,7 +364,7 @@ func (r *dashboardAggregationRepository) upsertHourlyAggregates(ctx context.Cont
 			hourly.account_cost,
 			hourly.total_duration_ms,
 			COALESCE(user_counts.active_users, 0) AS active_users,
-			NOW()
+			datetime('now')
 		FROM hourly
 		LEFT JOIN user_counts ON user_counts.bucket_start = hourly.bucket_start
 		ON CONFLICT (bucket_start)
@@ -366,7 +380,7 @@ func (r *dashboardAggregationRepository) upsertHourlyAggregates(ctx context.Cont
 			total_duration_ms = EXCLUDED.total_duration_ms,
 			active_users = EXCLUDED.active_users,
 			computed_at = EXCLUDED.computed_at
-	`
+	`, sqliteNormalizedTimestampExpr("created_at"), sqliteNormalizedTimestampExpr("$1"), sqliteNormalizedTimestampExpr("$2"))
 	_, err := r.sql.ExecContext(ctx, query, start, end)
 	return err
 }
@@ -421,7 +435,7 @@ func (r *dashboardAggregationRepository) upsertDailyAggregates(ctx context.Conte
 			daily.account_cost,
 			daily.total_duration_ms,
 			COALESCE(user_counts.active_users, 0) AS active_users,
-			NOW()
+			datetime('now')
 		FROM daily
 		LEFT JOIN user_counts ON user_counts.bucket_date = daily.bucket_date
 		ON CONFLICT (bucket_date)

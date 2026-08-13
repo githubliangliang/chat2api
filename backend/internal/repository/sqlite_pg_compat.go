@@ -91,6 +91,7 @@ func parseSQLiteTime(v driver.Value) (time.Time, bool) {
 		layouts := []string{
 			time.RFC3339Nano,
 			time.RFC3339,
+			"2006-01-02 15:04:05-07",
 			"2006-01-02 15:04:05.999999999Z07:00",
 			"2006-01-02 15:04:05Z07:00",
 			"2006-01-02 15:04:05.999999999",
@@ -99,6 +100,11 @@ func parseSQLiteTime(v driver.Value) (time.Time, bool) {
 		}
 		for _, layout := range layouts {
 			if parsed, err := time.Parse(layout, s); err == nil {
+				return parsed, true
+			}
+		}
+		if len(s) >= 19 {
+			if parsed, err := time.Parse("2006-01-02 15:04:05", s[:19]); err == nil {
 				return parsed, true
 			}
 		}
@@ -118,6 +124,14 @@ func parseSQLiteTime(v driver.Value) (time.Time, bool) {
 	default:
 		return time.Time{}, false
 	}
+}
+
+func sqliteNormalizedTimestampExpr(column string) string {
+	return fmt.Sprintf(`CASE
+		WHEN typeof(%[1]s) IN ('integer', 'real') THEN datetime(%[1]s, 'unixepoch')
+		WHEN length(CAST(%[1]s AS TEXT)) >= 19 THEN datetime(substr(CAST(%[1]s AS TEXT), 1, 19))
+		ELSE NULL
+	END`, column)
 }
 
 func sqliteNumericExtreme(max bool) func(*sqlite.FunctionContext, []driver.Value) (driver.Value, error) {
