@@ -63,4 +63,23 @@ func TestAccountRepositorySQLiteRemainingPaths(t *testing.T) {
 	updated, err = client.Account.Get(ctx, updated.ID)
 	require.NoError(t, err)
 	require.InDelta(t, 0, updated.Extra["quota_used"], 0.000001)
+
+	updated, err = updated.Update().SetExtra(map[string]any{
+		service.UpstreamBillingProbeEnabledExtraKey:    true,
+		service.UpstreamBillingRateSyncEnabledExtraKey: true,
+		service.UpstreamBillingProbeExtraKey:           map[string]any{"status": "old"},
+	}).Save(ctx)
+	require.NoError(t, err)
+	loaded, err := repo.GetByID(ctx, updated.ID)
+	require.NoError(t, err)
+	rate := 1.5
+	require.NoError(t, repo.UpdateUpstreamBillingProbeSnapshot(ctx, loaded, &service.UpstreamBillingProbeSnapshot{Status: service.UpstreamBillingProbeStatusOK}, &rate))
+	updated, err = client.Account.Get(ctx, updated.ID)
+	require.NoError(t, err)
+	require.InDelta(t, rate, updated.RateMultiplier, 0.000001)
+
+	require.NoError(t, repo.UpdateExtra(ctx, updated.ID, map[string]any{service.UpstreamBillingProbeEnabledExtraKey: false}))
+	updated, err = client.Account.Get(ctx, updated.ID)
+	require.NoError(t, err)
+	require.NotContains(t, updated.Extra, service.UpstreamBillingProbeExtraKey)
 }
