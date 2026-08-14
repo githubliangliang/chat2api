@@ -3,9 +3,13 @@ package repository
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"io/fs"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/Wei-Shaw/sub2api/migrations"
 )
 
 func TestIsMigrationRawChecksumCompatible(t *testing.T) {
@@ -184,4 +188,63 @@ func TestIsMigrationChecksumCompatible(t *testing.T) {
 		)
 		require.False(t, ok)
 	})
+}
+
+// sqliteSeedTimestampRewrites 记录被 SQLite 化改写过的 seed 迁移：
+// dbChecksum 是改写前（旧构建写进 schema_migrations）的值，fileChecksum 是当前文件的值。
+var sqliteSeedTimestampRewrites = map[string]struct{ dbChecksum, fileChecksum string }{
+	"110_pending_auth_and_provider_default_grants.sql": {
+		"03fd65ec608f2dd0b5929d93b2c9af3a3d15973a80f37ff5ca00ca24d16493b5",
+		"7d2b4484e088c1ea21f06b31a2738ac3068471f03efcb234e566ea965dcf68bf",
+	},
+	"111_payment_routing_and_scheduler_flags.sql": {
+		"f2e205ac3cc8a812bbff5bdd7d7515e2d7f8c6bfee3e47dbfe190863db899816",
+		"1c69e7af9ea0cb312e005994a3959fc8a7ff8cfd12a99dca5b3bf7214193f5f4",
+	},
+	"118_wechat_dual_mode_and_auth_source_defaults.sql": {
+		"dd3a0a21ca6c3dc5f22067c8175c7ab3a2510c7640e7b75aac58024b7b7f6f42",
+		"3bd0af162c0d95eb7b47f42ea0963b02100c417027980b658382ff397162e3b6",
+	},
+	"129_seed_claude_code_template.sql": {
+		"b820187864d8077e0f78c57c33d323870aa09a5677810f2399249581ed58c5e5",
+		"6ac26c78f7322868caabb4a47262a7c22112856a2bcb13dd998dff15d29e21be",
+	},
+	"139_seed_openai_monitor_templates.sql": {
+		"93d2d36a9df5f122614549c1ce9808a207ca79032f5617a941b52782a5c726cd",
+		"3f81be9c6336610c27ad5a2f28dc3d946baa8d154d863fc73166168efc68a4b3",
+	},
+	"195_channel_monitor_mode.sql": {
+		"521b2598eb9c128df672218bc73abdc7255959068f5b57e4d70afe02ce9d2494",
+		"22d5c8b6a52555039b769865a3a70c16230a767121e75e16ce337b12bd7395f5",
+	},
+	"204_channel_monitor_hide_throughput.sql": {
+		"b02696eb4f646aafc25dd2e631281fdef770fcf2918f0708abe5ad709357738b",
+		"5f80e58b97b3fe360f6c919fa11ffd40f1d95be20de545e2b6962b583d7b2070",
+	},
+}
+
+// SQLite 化过程中，这批 seed 迁移被改写过一次：INSERT 补上 created_at / updated_at =
+// datetime('now')（settings、channel_monitor_request_templates 的 NOT NULL 列）。
+// 用改写前的构建迁移过的库里记的是旧 checksum，升级时必须仍能放行，否则启动直接失败。
+//
+// 每条用例同时校验「当前文件的 checksum」确实等于规则里登记的值：
+// 再改这些文件时本测试会失败，提醒把新 checksum 也登记进 allowlist。
+func TestMigrationChecksumCompatibility_SQLiteSeedTimestampRewrites(t *testing.T) {
+	for name, want := range sqliteSeedTimestampRewrites {
+		t.Run(name, func(t *testing.T) {
+			content, err := fs.ReadFile(migrations.FS, name)
+			require.NoError(t, err)
+			sum := sha256.Sum256([]byte(strings.TrimSpace(string(content))))
+			require.Equal(t, want.fileChecksum, hex.EncodeToString(sum[:]),
+				"迁移文件已改动：请把新 checksum 加进 migrationChecksumCompatibilityRules 与本用例")
+
+			require.True(t, isMigrationChecksumCompatible(name, want.dbChecksum, want.fileChecksum),
+				"旧库的历史 checksum 必须仍可启动")
+			require.False(t, isMigrationChecksumCompatible(
+				name,
+				"0000000000000000000000000000000000000000000000000000000000000000",
+				want.fileChecksum,
+			))
+		})
+	}
 }
