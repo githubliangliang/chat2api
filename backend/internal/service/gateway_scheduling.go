@@ -393,6 +393,11 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 							}
 
 							if stickyCacheMissReason == "" {
+								if s.hasAlternateSchedulableCapacity(ctx, accounts, stickyAccountID, isExcluded, platform, useMixed, requestedModel) {
+									stickyCacheMissReason = "capacity_full_switch"
+								}
+							}
+							if stickyCacheMissReason == "" {
 								waitingCount, _ := s.concurrencyService.GetAccountWaitingCount(ctx, stickyAccountID)
 								if waitingCount < cfg.StickySessionMaxWaiting {
 									fresh := s.recheckSelectedGatewayAccountFromDB(ctx, stickyAccount, groupID, platform, useMixed, requestedModel, true)
@@ -617,27 +622,32 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 							"account_id", accountID,
 							"session", shortSessionHash(sessionHash),
 						)
-					}
-
-					waitingCount, _ := s.concurrencyService.GetAccountWaitingCount(ctx, accountID)
-					if waitingCount < cfg.StickySessionMaxWaiting {
-						// 会话数量限制检查（等待计划也需要占用会话配额）
-						fresh := s.recheckSelectedGatewayAccountFromDB(ctx, account, groupID, platform, useMixed, requestedModel, true)
-						if fresh == nil || !s.checkAndRegisterSession(ctx, fresh, sessionHash) {
-							// 会话限制已满，继续到 Layer 2
+						if s.hasAlternateSchedulableCapacity(ctx, accounts, accountID, isExcluded, platform, useMixed, requestedModel) {
+							if s.cache != nil {
+								_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
+							}
 						} else {
-							account = fresh
-							slog.Debug("sticky.layer1_5_no_routing_hit",
-								"account_id", accountID,
-								"session", shortSessionHash(sessionHash),
-								"result", "wait_plan",
-							)
-							return s.newSelectionResult(ctx, account, false, nil, &AccountWaitPlan{
-								AccountID:      accountID,
-								MaxConcurrency: account.Concurrency,
-								Timeout:        cfg.StickySessionWaitTimeout,
-								MaxWaiting:     cfg.StickySessionMaxWaiting,
-							})
+							waitingCount, _ := s.concurrencyService.GetAccountWaitingCount(ctx, accountID)
+							if waitingCount < cfg.StickySessionMaxWaiting {
+								// 会话数量限制检查（等待计划也需要占用会话配额）
+								fresh := s.recheckSelectedGatewayAccountFromDB(ctx, account, groupID, platform, useMixed, requestedModel, true)
+								if fresh == nil || !s.checkAndRegisterSession(ctx, fresh, sessionHash) {
+									// 会话限制已满，继续到 Layer 2
+								} else {
+									account = fresh
+									slog.Debug("sticky.layer1_5_no_routing_hit",
+										"account_id", accountID,
+										"session", shortSessionHash(sessionHash),
+										"result", "wait_plan",
+									)
+									return s.newSelectionResult(ctx, account, false, nil, &AccountWaitPlan{
+										AccountID:      accountID,
+										MaxConcurrency: account.Concurrency,
+										Timeout:        cfg.StickySessionWaitTimeout,
+										MaxWaiting:     cfg.StickySessionMaxWaiting,
+									})
+								}
+							}
 						}
 					}
 				} else if !clearSticky {
@@ -1183,6 +1193,40 @@ func (s *GatewayService) isAccountInGroup(account *Account, groupID *int64) bool
 		if ag.GroupID == *groupID {
 			return true
 		}
+	}
+	return false
+}
+
+func (s *GatewayService) hasAlternateSchedulableCapacity(ctx context.Context, accounts []Account, busyAccountID int64, isExcluded func(int64) bool, platform string, useMixed bool, requestedModel string) bool {
+	if s == nil || len(accounts) == 0 {
+		return false
+	}
+	for i := range accounts {
+		acc := &accounts[i]
+		if acc == nil || acc.ID == busyAccountID || isExcluded(acc.ID) {
+			continue
+		}
+		if !s.isAccountSchedulableForSelection(acc) ||
+			!s.isGatewayAccountProfitEligible(ctx, acc) ||
+			!s.isAccountAllowedForPlatform(acc, platform, useMixed) ||
+			(requestedModel != "" && !s.isModelSupportedByAccountWithContext(ctx, acc, requestedModel)) ||
+			!s.isAccountSchedulableForModelSelection(ctx, acc, requestedModel) ||
+			!s.isAccountSchedulableForQuota(acc) ||
+			!s.isAccountSchedulableForWindowCost(ctx, acc, false) ||
+			!s.isAccountSchedulableForRPM(ctx, acc, false) {
+			continue
+		}
+		if s.concurrencyService == nil || acc.Concurrency <= 0 {
+			return true
+		}
+		result, err := s.tryAcquireAccountSlot(ctx, acc.ID, acc.Concurrency)
+		if err != nil || result == nil || !result.Acquired {
+			continue
+		}
+		if result.ReleaseFunc != nil {
+			result.ReleaseFunc()
+		}
+		return true
 	}
 	return false
 }

@@ -1024,14 +1024,18 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 							return selection, nil
 						}
 
-						waitingCount, _ := s.concurrencyService.GetAccountWaitingCount(ctx, accountID)
-						if waitingCount < cfg.StickySessionMaxWaiting {
-							return s.newSelectionResult(ctx, account, false, nil, &AccountWaitPlan{
-								AccountID:      accountID,
-								MaxConcurrency: account.Concurrency,
-								Timeout:        cfg.StickySessionWaitTimeout,
-								MaxWaiting:     cfg.StickySessionMaxWaiting,
-							})
+						if !s.hasAlternateOpenAICapacity(ctx, accounts, accountID, isExcluded, platform, requestedModel, requireCompact, requiredCapability) {
+							waitingCount, _ := s.concurrencyService.GetAccountWaitingCount(ctx, accountID)
+							if waitingCount < cfg.StickySessionMaxWaiting {
+								return s.newSelectionResult(ctx, account, false, nil, &AccountWaitPlan{
+									AccountID:      accountID,
+									MaxConcurrency: account.Concurrency,
+									Timeout:        cfg.StickySessionWaitTimeout,
+									MaxWaiting:     cfg.StickySessionMaxWaiting,
+								})
+							}
+						} else {
+							_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
 						}
 					}
 				}
@@ -1305,6 +1309,36 @@ func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, grou
 		accounts = s.filterGrokFreeQuotaAccountsForOpenAI(ctx, accounts)
 	}
 	return accounts, nil
+}
+
+func (s *OpenAIGatewayService) hasAlternateOpenAICapacity(ctx context.Context, accounts []Account, busyAccountID int64, isExcluded func(int64) bool, platform, requestedModel string, requireCompact bool, requiredCapability OpenAIEndpointCapability) bool {
+	if s == nil || len(accounts) == 0 {
+		return false
+	}
+	for i := range accounts {
+		acc := &accounts[i]
+		if acc == nil || acc.ID == busyAccountID || (isExcluded != nil && isExcluded(acc.ID)) {
+			continue
+		}
+		if !isOpenAICompatibleAccountEligibleForRequest(ctx, acc, platform, requestedModel, requireCompact, requiredCapability) {
+			continue
+		}
+		if s.isOpenAIAccountRequestRuntimeBlocked(acc, requestedModel) {
+			continue
+		}
+		if !parentHealthyForShadow(acc, s.parentAccountLookup(ctx)) {
+			continue
+		}
+		result, err := s.tryAcquireAccountSlot(ctx, acc.ID, acc.Concurrency)
+		if err != nil || result == nil || !result.Acquired {
+			continue
+		}
+		if result.ReleaseFunc != nil {
+			result.ReleaseFunc()
+		}
+		return true
+	}
+	return false
 }
 
 func (s *OpenAIGatewayService) tryAcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int) (*AcquireResult, error) {

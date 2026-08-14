@@ -2061,6 +2061,11 @@ func (m *mockConcurrencyCache) ReleaseAccountSlot(ctx context.Context, accountID
 }
 
 func (m *mockConcurrencyCache) GetAccountConcurrency(ctx context.Context, accountID int64) (int, error) {
+	if m.loadMap != nil {
+		if info, ok := m.loadMap[accountID]; ok && info != nil {
+			return info.CurrentConcurrency, nil
+		}
+	}
 	return 0, nil
 }
 
@@ -2521,44 +2526,89 @@ func TestGatewayService_SelectAccountWithLoadAwareness(t *testing.T) {
 		require.Equal(t, int64(2), result.Account.ID, "应跳过过载账号，选择可用账号")
 	})
 
-	t.Run("粘性账号槽位满-返回粘性等待计划", func(t *testing.T) {
-		repo := &mockAccountRepoForPlatform{
-			accounts: []Account{
-				{ID: 1, Platform: PlatformAnthropic, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 5},
-			},
-			accountsByID: map[int64]*Account{},
-		}
-		for i := range repo.accounts {
-			repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
-		}
+		t.Run("粘性账号槽位满-同组有空闲账号时切换", func(t *testing.T) {
+			repo := &mockAccountRepoForPlatform{
+				accounts: []Account{
+					{ID: 1, Platform: PlatformAnthropic, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 1},
+					{ID: 2, Platform: PlatformAnthropic, Priority: 2, Status: StatusActive, Schedulable: true, Concurrency: 1},
+				},
+				accountsByID: map[int64]*Account{},
+			}
+			for i := range repo.accounts {
+				repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+			}
 
-		cache := &mockGatewayCacheForPlatform{
-			sessionBindings: map[string]int64{"sticky": 1},
-		}
+			cache := &mockGatewayCacheForPlatform{
+				sessionBindings: map[string]int64{"sticky": 1},
+			}
 
-		cfg := testConfig()
-		cfg.Gateway.Scheduling.LoadBatchEnabled = true
-		cfg.Gateway.Scheduling.StickySessionMaxWaiting = 1
+			cfg := testConfig()
+			cfg.Gateway.Scheduling.LoadBatchEnabled = true
+			cfg.Gateway.Scheduling.StickySessionMaxWaiting = 3
 
-		concurrencyCache := &mockConcurrencyCache{
-			acquireResults: map[int64]bool{1: false},
-			waitCounts:     map[int64]int{1: 0},
-		}
+			concurrencyCache := &mockConcurrencyCache{
+				acquireResults: map[int64]bool{1: false, 2: true},
+				waitCounts:     map[int64]int{1: 0},
+				loadMap: map[int64]*AccountLoadInfo{
+					1: {AccountID: 1, CurrentConcurrency: 1, LoadRate: 100},
+					2: {AccountID: 2, CurrentConcurrency: 0, LoadRate: 0},
+				},
+			}
 
-		svc := &GatewayService{
-			accountRepo:        repo,
-			cache:              cache,
-			cfg:                cfg,
-			concurrencyService: NewConcurrencyService(concurrencyCache),
-		}
+			svc := &GatewayService{
+				accountRepo:        repo,
+				cache:              cache,
+				cfg:                cfg,
+				concurrencyService: NewConcurrencyService(concurrencyCache),
+			}
 
-		result, err := svc.SelectAccountWithLoadAwareness(ctx, nil, "sticky", "claude-3-5-sonnet-20241022", nil, "", int64(0))
-		require.NoError(t, err)
-		require.NotNil(t, result)
-		require.NotNil(t, result.WaitPlan)
-		require.Equal(t, int64(1), result.Account.ID)
-		require.Equal(t, 0, concurrencyCache.loadBatchCalls)
-	})
+			result, err := svc.SelectAccountWithLoadAwareness(ctx, nil, "sticky", "claude-3-5-sonnet-20241022", nil, "", int64(0))
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Nil(t, result.WaitPlan)
+			require.NotNil(t, result.Account)
+			require.Equal(t, int64(2), result.Account.ID)
+			require.Equal(t, int64(2), cache.sessionBindings["sticky"])
+		})
+
+		t.Run("粘性账号槽位满-没有其他账号才等待", func(t *testing.T) {
+			repo := &mockAccountRepoForPlatform{
+				accounts: []Account{
+					{ID: 1, Platform: PlatformAnthropic, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 5},
+				},
+				accountsByID: map[int64]*Account{},
+			}
+			for i := range repo.accounts {
+				repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+			}
+
+			cache := &mockGatewayCacheForPlatform{
+				sessionBindings: map[string]int64{"sticky": 1},
+			}
+
+			cfg := testConfig()
+			cfg.Gateway.Scheduling.LoadBatchEnabled = true
+			cfg.Gateway.Scheduling.StickySessionMaxWaiting = 1
+
+			concurrencyCache := &mockConcurrencyCache{
+				acquireResults: map[int64]bool{1: false, 2: false},
+				waitCounts:     map[int64]int{1: 0},
+			}
+
+			svc := &GatewayService{
+				accountRepo:        repo,
+				cache:              cache,
+				cfg:                cfg,
+				concurrencyService: NewConcurrencyService(concurrencyCache),
+			}
+
+			result, err := svc.SelectAccountWithLoadAwareness(ctx, nil, "sticky", "claude-3-5-sonnet-20241022", nil, "", int64(0))
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.NotNil(t, result.WaitPlan)
+			require.Equal(t, int64(1), result.Account.ID)
+			require.Equal(t, 0, concurrencyCache.loadBatchCalls)
+		})
 
 	t.Run("负载批量查询失败-降级旧顺序选择", func(t *testing.T) {
 		repo := &mockAccountRepoForPlatform{
@@ -2635,7 +2685,7 @@ func TestGatewayService_SelectAccountWithLoadAwareness(t *testing.T) {
 		cfg.Gateway.Scheduling.StickySessionMaxWaiting = 1
 
 		concurrencyCache := &mockConcurrencyCache{
-			acquireResults: map[int64]bool{1: false},
+			acquireResults: map[int64]bool{1: false, 2: false},
 			waitCounts:     map[int64]int{1: 0},
 		}
 

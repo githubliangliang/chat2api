@@ -557,6 +557,10 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 			)
 			return nil, true, nil
 		}
+		if s.hasAlternateOpenAICapacity(ctx, req, accountID) {
+			_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
+			return nil, false, nil
+		}
 		return attachSelectionProfitGate(ctx, &AccountSelectionResult{
 			Account: account,
 			WaitPlan: &AccountWaitPlan{
@@ -568,6 +572,45 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 		}), false, nil
 	}
 	return nil, false, nil
+}
+
+func (s *defaultOpenAIAccountScheduler) hasAlternateOpenAICapacity(ctx context.Context, req OpenAIAccountScheduleRequest, busyAccountID int64) bool {
+	if s == nil || s.service == nil {
+		return false
+	}
+	accounts, err := s.service.listSchedulableAccounts(ctx, req.GroupID, req.Platform)
+	if err != nil || len(accounts) == 0 {
+		return false
+	}
+	for i := range accounts {
+		acc := &accounts[i]
+		if acc == nil || acc.ID == busyAccountID {
+			continue
+		}
+		if req.ExcludedIDs != nil {
+			if _, excluded := req.ExcludedIDs[acc.ID]; excluded {
+				continue
+			}
+		}
+		if !s.isAccountRequestCompatible(ctx, acc, req) || !s.isAccountTransportCompatible(acc, req.RequiredTransport) {
+			continue
+		}
+		if req.RequireCompact && openAICompactSupportTier(acc) == 0 {
+			continue
+		}
+		if len(s.filterGrokFreeQuotaAccounts(ctx, []Account{*acc})) == 0 {
+			continue
+		}
+		result, acquireErr := s.service.tryAcquireAccountSlot(ctx, acc.ID, acc.Concurrency)
+		if acquireErr != nil || result == nil || !result.Acquired {
+			continue
+		}
+		if result.ReleaseFunc != nil {
+			result.ReleaseFunc()
+		}
+		return true
+	}
+	return false
 }
 
 func openAIStickyAccountMatchesGroup(account *Account, groupID *int64) bool {
