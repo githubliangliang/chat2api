@@ -248,9 +248,8 @@ const breakdownFilters = computed(() => {
   return f
 })
 
-const modelNameOptions = computed(() =>
-  Array.from(new Set(requestedModelStats.value.map((m) => m.model).filter(Boolean))).sort()
-)
+const modelOptionValues = ref<string[]>([])
+const modelNameOptions = computed(() => modelOptionValues.value)
 
 const handleUserClick = async (userId: number) => {
   try {
@@ -295,7 +294,17 @@ const getGranularityForRange = (start: string, end: string): 'day' | 'hour' => {
 }
 const defaultRange = getLast24HoursRangeDates()
 const startDate = ref(defaultRange.start); const endDate = ref(defaultRange.end)
-const filters = ref<AdminUsageQueryParams>({ user_id: undefined, model: undefined, group_id: undefined, request_type: undefined, billing_type: null, start_date: startDate.value, end_date: endDate.value })
+const filters = ref<AdminUsageQueryParams>({ user_id: undefined, model: null, group_id: undefined, request_type: undefined, billing_type: null, start_date: startDate.value, end_date: endDate.value })
+
+const refreshModelOptions = (models: Array<{ model?: string | null }>) => {
+  const current = filters.value.model
+  const set = new Set(modelOptionValues.value)
+  models.forEach((item) => {
+    if (item.model) set.add(item.model)
+  })
+  if (current) set.add(current)
+  modelOptionValues.value = Array.from(set).sort()
+}
 const pagination = reactive({ page: 1, page_size: getPersistedPageSize(), total: 0 })
 const sortState = reactive({
   sort_by: 'created_at',
@@ -392,7 +401,11 @@ const loadLogs = async () => {
       buildUsageListParams(pagination.page, pagination.page_size, false),
       { signal: c.signal }
     )
-    if(!c.signal.aborted) { usageLogs.value = res.items; pagination.total = res.total }
+    if(!c.signal.aborted) {
+      usageLogs.value = res.items
+      pagination.total = res.total
+      refreshModelOptions(res.items || [])
+    }
   } catch (error: any) { if(error?.name !== 'AbortError') console.error('Failed to load usage logs:', error) } finally { if(abortController === c) loading.value = false }
 }
 const loadStats = async (force = false) => {
@@ -459,6 +472,7 @@ const loadModelStats = async (source: ModelDistributionSource, force = false) =>
 
     const models = response.models || []
     if (source === 'requested') {
+      refreshModelOptions(models)
       requestedModelStats.value = models
     } else if (source === 'upstream') {
       upstreamModelStats.value = models

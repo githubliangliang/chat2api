@@ -687,3 +687,79 @@ describe('admin UsageView model audit export', () => {
 		expect(saveAs).toHaveBeenCalledTimes(1)
 	})
 })
+
+const UsageFiltersModelOptionsStub = defineComponent({
+  props: {
+    modelOptions: { type: Array, default: () => [] },
+  },
+  template: '<div data-test="model-options">{{ (modelOptions || []).join(",") }}</div>',
+})
+
+describe('admin UsageView model filter options', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    list.mockReset().mockResolvedValue({ items: [], total: 0, pages: 0 })
+    getStats.mockReset().mockResolvedValue({
+      total_requests: 0, total_input_tokens: 0, total_output_tokens: 0,
+      total_cache_tokens: 0, total_tokens: 0, total_cost: 0, total_actual_cost: 0, average_duration_ms: 0,
+    })
+    getSnapshotV2.mockReset().mockResolvedValue({ trend: [], models: [], groups: [] })
+    getModelStats.mockReset().mockResolvedValue({ models: [] })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  const mountWithModelFilter = () => mount(UsageView, {
+    global: { stubs: {
+      AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: UsageFiltersModelOptionsStub,
+      UsageTable: true, UsageExportProgress: true, UsageCleanupDialog: true,
+      UserBalanceHistoryModal: true, Pagination: true, Select: true,
+      DateRangePicker: true, Icon: true, TokenUsageTrend: true,
+      ModelDistributionChart: true, GroupDistributionChart: true,
+      EndpointDistributionChart: true, UserTokenRanking: true,
+    } },
+  })
+
+  it('fills the model dropdown from usage logs when dashboard model stats are empty', async () => {
+    list.mockResolvedValue({
+      items: [
+        { id: 1, model: 'claude-sonnet-4-6' },
+        { id: 2, model: 'gpt-5.4' },
+        { id: 3, model: 'claude-sonnet-4-6' },
+      ],
+      total: 3,
+      pages: 1,
+    })
+    getModelStats.mockResolvedValue({ models: [] })
+
+    const wrapper = mountWithModelFilter()
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="model-options"]').text().split(',').filter(Boolean).sort()).toEqual([
+      'claude-sonnet-4-6',
+      'gpt-5.4',
+    ])
+  })
+
+  it('fills the model dropdown from requested model stats when logs have no models', async () => {
+    list.mockResolvedValue({ items: [{ id: 1 }], total: 1, pages: 1 })
+    getModelStats.mockResolvedValue({
+      models: [
+        { model: 'claude-opus-4-6', total_tokens: 10 },
+        { model: 'gpt-5.4', total_tokens: 4 },
+      ],
+    })
+
+    const wrapper = mountWithModelFilter()
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="model-options"]').text().split(',').filter(Boolean).sort()).toEqual([
+      'claude-opus-4-6',
+      'gpt-5.4',
+    ])
+  })
+})
