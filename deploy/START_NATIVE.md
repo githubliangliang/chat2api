@@ -92,6 +92,38 @@ sudo systemctl enable --now sub2api
 
 ---
 
+## 一键发布（推荐，全程免密）
+
+本地改完代码后，一条命令完成：构建 → 打包 → 上传 → 重启 → 健康检查（失败自动回滚）。
+
+```bash
+cp deploy/deploy.env.example deploy/deploy.env   # 填 REMOTE_HOST / REMOTE_USER / REMOTE_DIR
+deploy/deploy-remote.sh --setup-key              # 装公钥，只需输入一次服务器密码
+deploy/deploy-remote.sh                          # 之后每次发布都不用输密码
+```
+
+常用参数：
+
+| 参数 | 作用 |
+|------|------|
+| `--skip-frontend` | 只改了后端，复用已有 `backend/internal/web/dist` |
+| `--skip-build` | 直接发布现有 `./sub2api` |
+| `--package-only` | 只本地打包不连服务器，产物在 `dist/` |
+| `--no-restart` | 只换二进制不重启 |
+| `--dry-run` / `-y` | 预演 / 跳过确认 |
+
+行为约定：
+
+- 远端**已有** `data/config.yaml` 与 systemd unit 时不会被覆盖；要覆盖得显式加 `--force-config` / `--force-unit`，且旧文件自动备份。
+- 换二进制前先在服务器上跑一次 `sub2api -version` 自检，架构不对直接中止，不动线上服务。
+- 旧二进制存为 `sub2api.prev`，历史版本留在 `releases/`（默认保留 3 个）。
+- 重启后轮询 `127.0.0.1:$APP_PORT/health`，超时（默认 60s）自动回滚并打印 `journalctl` 最后 40 行。
+- 免密要两件事：SSH 免密（密钥，`--setup-key` 一次搞定）+ 远端免密 sudo（或直接用 root）。
+
+等价的 Makefile 入口：`make deploy ARGS="--skip-frontend -y"`、`make deploy-package`。
+
+---
+
 ## 建议系统
 
 ```bash

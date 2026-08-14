@@ -1,4 +1,4 @@
-.PHONY: build build-backend build-frontend test test-backend test-frontend test-frontend-critical
+.PHONY: build build-backend build-frontend test test-backend test-frontend test-frontend-critical deploy deploy-package
 
 FRONTEND_CRITICAL_VITEST := \
 	src/api/__tests__/client.spec.ts \
@@ -39,3 +39,12 @@ test-frontend:
 
 test-frontend-critical:
 	@pnpm --dir frontend exec vitest run $(FRONTEND_CRITICAL_VITEST)
+
+# 构建 + 打包 + 免密上传 VPS + 重启（配置见 deploy/deploy.env，参数用 ARGS= 传）
+# 例：make deploy ARGS="--skip-frontend -y"
+deploy:
+	@./deploy/deploy-remote.sh $(ARGS)
+
+# 只本地构建打包，产物在 dist/
+deploy-package:
+	@./deploy/deploy-remote.sh --package-only $(ARGS)
