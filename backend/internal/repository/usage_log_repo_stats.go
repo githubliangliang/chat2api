@@ -343,6 +343,7 @@ func (r *usageLogRepository) GetAccountWindowStatsBatch(ctx context.Context, acc
 	}
 
 	idClause, idArgs := sqlInt64In("account_id", accountIDs, 1)
+	startArg := fmt.Sprintf("$%d", len(idArgs)+1)
 	query := `
 		SELECT
 			account_id,
@@ -352,7 +353,7 @@ func (r *usageLogRepository) GetAccountWindowStatsBatch(ctx context.Context, acc
 			COALESCE(SUM(total_cost), 0) as standard_cost,
 			COALESCE(SUM(actual_cost), 0) as user_cost
 		FROM usage_logs
-		WHERE ` + idClause + ` AND created_at >= $2
+		WHERE ` + idClause + ` AND created_at >= ` + startArg + `
 		GROUP BY account_id
 	`
 	rows, err := r.sql.QueryContext(ctx, query, append(idArgs, any(startTime))...)
@@ -397,6 +398,8 @@ func (r *usageLogRepository) GetGeminiUsageTotalsBatch(ctx context.Context, acco
 	}
 
 	idClause, idArgs := sqlInt64In("account_id", accountIDs, 1)
+	startArg := fmt.Sprintf("$%d", len(idArgs)+1)
+	endArg := fmt.Sprintf("$%d", len(idArgs)+2)
 	query := `
 		SELECT
 			account_id,
@@ -407,7 +410,7 @@ func (r *usageLogRepository) GetGeminiUsageTotalsBatch(ctx context.Context, acco
 			COALESCE(SUM(CASE WHEN LOWER(COALESCE(model, '')) LIKE '%flash%' OR LOWER(COALESCE(model, '')) LIKE '%lite%' THEN actual_cost ELSE 0 END), 0) AS flash_cost,
 			COALESCE(SUM(CASE WHEN LOWER(COALESCE(model, '')) LIKE '%flash%' OR LOWER(COALESCE(model, '')) LIKE '%lite%' THEN 0 ELSE actual_cost END), 0) AS pro_cost
 		FROM usage_logs
-		WHERE ` + idClause + ` AND created_at >= $2 AND created_at < $3
+		WHERE ` + idClause + ` AND created_at >= ` + startArg + ` AND created_at < ` + endArg + `
 		GROUP BY account_id
 	`
 	rows, err := r.sql.QueryContext(ctx, query, append(idArgs, startTime, endTime)...)

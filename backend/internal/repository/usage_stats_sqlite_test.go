@@ -117,6 +117,48 @@ func TestBatchUserUsageStatsRunsOnSQLiteWithMultipleIDs(t *testing.T) {
 	require.Empty(t, stats[11].ByPlatform)
 }
 
+func TestGetAccountWindowStatsBatchIgnoresHistoryOutsideWindow(t *testing.T) {
+	db := openUsageStatsSQLite(t)
+	windowStart := time.Date(2026, 8, 14, 10, 0, 0, 0, time.UTC)
+	_, err := db.Exec(`INSERT INTO usage_logs (
+		id, user_id, api_key_id, account_id, request_id, model, total_cost, actual_cost, created_at
+	) VALUES
+		(301, 10, 20, 30, 'acc-a-history', 'claude-opus-4-6', 40.0, 40.0, ?),
+		(302, 10, 20, 30, 'acc-a-window', 'claude-opus-4-6', 5.0, 5.0, ?),
+		(303, 10, 21, 31, 'acc-b-history', 'claude-opus-4-6', 40.0, 40.0, ?)`,
+		windowStart.Add(-time.Hour), windowStart.Add(time.Hour), windowStart.Add(-time.Hour))
+	require.NoError(t, err)
+
+	repo := newUsageLogRepositoryWithSQL(nil, db)
+	stats, err := repo.GetAccountWindowStatsBatch(context.Background(), []int64{30, 31}, windowStart)
+	require.NoError(t, err)
+	require.Equal(t, 5.0, stats[30].StandardCost)
+	require.Zero(t, stats[31].StandardCost)
+}
+
+func TestGetGeminiUsageTotalsBatchIgnoresHistoryOutsideWindow(t *testing.T) {
+	db := openUsageStatsSQLite(t)
+	start := time.Date(2026, 8, 14, 10, 0, 0, 0, time.UTC)
+	end := start.Add(5 * time.Hour)
+	_, err := db.Exec(`INSERT INTO usage_logs (
+		id, user_id, api_key_id, account_id, request_id, model, input_tokens, output_tokens,
+		cache_creation_tokens, cache_read_tokens, actual_cost, created_at
+	) VALUES
+		(401, 10, 20, 30, 'gemini-a-history', 'gemini-2.5-pro', 100, 50, 0, 0, 8.0, ?),
+		(402, 10, 20, 30, 'gemini-a-window', 'gemini-2.5-flash', 10, 5, 0, 0, 1.0, ?),
+		(403, 10, 21, 31, 'gemini-b-history', 'gemini-2.5-pro', 100, 50, 0, 0, 8.0, ?)`,
+		start.Add(-time.Hour), start.Add(time.Hour), start.Add(-time.Hour))
+	require.NoError(t, err)
+
+	repo := newUsageLogRepositoryWithSQL(nil, db)
+	stats, err := repo.GetGeminiUsageTotalsBatch(context.Background(), []int64{30, 31}, start, end)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), stats[30].FlashRequests)
+	require.Zero(t, stats[30].ProRequests)
+	require.Zero(t, stats[31].ProRequests)
+	require.Zero(t, stats[31].FlashRequests)
+}
+
 func openUsageStatsSQLite(t *testing.T) *sql.DB {
 	t.Helper()
 	db, err := sql.Open("sqlite", fmt.Sprintf("file:%s?mode=memory&cache=shared&_time_format=sqlite", t.Name()))
