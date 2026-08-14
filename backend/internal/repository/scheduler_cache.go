@@ -294,7 +294,12 @@ func (c *schedulerCache) GetSnapshot(ctx context.Context, bucket service.Schedul
 	accounts := make([]*service.Account, 0, len(values))
 	for i, val := range values {
 		if val == nil {
-			return nil, false, nil
+			// A deleted account still listed in the bucket ZSET must not
+			// invalidate the rest of the snapshot. DeleteAccount only
+			// removes the account key; the next outbox rebuild rewrites
+			// the ZSET. Until then, skip the hole and keep serving the
+			// remaining members.
+			continue
 		}
 		account, err := decodeCachedAccount(val)
 		if err != nil {
@@ -304,6 +309,11 @@ func (c *schedulerCache) GetSnapshot(ctx context.Context, bucket service.Schedul
 			return nil, false, err
 		}
 		accounts = append(accounts, account)
+	}
+	if len(accounts) == 0 {
+		// Every listed ID is gone. Treat as a miss so the reader falls
+		// back to DB instead of returning an empty "authoritative" pool.
+		return nil, false, nil
 	}
 
 	return accounts, true, nil

@@ -265,6 +265,25 @@ func TestSchedulerCacheSetSnapshotByAccountIDsDoesNotResurrectDeletedAccount(t *
 	require.Nil(t, snapshot)
 }
 
+func TestSchedulerCacheGetSnapshotSkipsDeletedMemberWithoutMissingWholeBucket(t *testing.T) {
+	ctx := context.Background()
+	cache := newSchedulerCacheUnit(t)
+	kept := service.Account{ID: 903, Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey}
+	removed := service.Account{ID: 904, Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey}
+	bucket := service.SchedulerBucket{GroupID: 21, Platform: service.PlatformAnthropic, Mode: service.SchedulerModeMixed}
+
+	token, err := cache.CaptureBucketWriteToken(ctx, bucket)
+	require.NoError(t, err)
+	require.NoError(t, cache.SetSnapshot(ctx, bucket, token, []service.Account{kept, removed}))
+	require.NoError(t, cache.DeleteAccount(ctx, removed.ID))
+
+	snapshot, hit, err := cache.GetSnapshot(ctx, bucket)
+	require.NoError(t, err)
+	require.True(t, hit, "deleting one member must not miss the whole bucket")
+	require.Len(t, snapshot, 1)
+	require.Equal(t, kept.ID, snapshot[0].ID)
+}
+
 func TestMarshalSchedulerCacheAccountKeepsEncodingJSONWireFormat(t *testing.T) {
 	cases := []struct {
 		name    string
