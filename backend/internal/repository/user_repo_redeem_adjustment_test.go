@@ -36,7 +36,7 @@ func TestApplyRedeemBalanceAdjustment_UsesAtomicFloor(t *testing.T) {
 
 func TestApplyRedeemConcurrencyAdjustment_UsesAtomicFloor(t *testing.T) {
 	repo, mock := newRedeemAdjustmentRepoMock(t)
-	mock.ExpectExec(`UPDATE users SET concurrency = GREATEST\(concurrency \+ \$1, 0\), updated_at = NOW\(\) WHERE id = \$2 AND deleted_at IS NULL`).
+	mock.ExpectExec(`UPDATE users SET concurrency = GREATEST\(concurrency \+ \$1, 0\), updated_at = CURRENT_TIMESTAMP WHERE id = \$2 AND deleted_at IS NULL`).
 		WithArgs(-7, int64(42)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
