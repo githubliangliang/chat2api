@@ -3409,8 +3409,8 @@ func (r *accountRepository) IncrementQuotaUsed(ctx context.Context, id int64, am
 	}
 	extra := normalizeJSONMap(current.Extra)
 	now := time.Now().UTC()
+	before := copyJSONMap(extra)
 	newUsed := quotaNumber(extra, "quota_used") + amount
-	limit := quotaNumber(extra, "quota_limit")
 	extra["quota_used"] = newUsed
 	updateUsageBillingQuotaWindow(extra, "daily", 24*time.Hour, quotaNumber(extra, "quota_daily_limit"), quotaNumber(extra, "quota_daily_used"), amount, now)
 	updateUsageBillingQuotaWindow(extra, "weekly", 7*24*time.Hour, quotaNumber(extra, "quota_weekly_limit"), quotaNumber(extra, "quota_weekly_used"), amount, now)
@@ -3420,13 +3420,30 @@ func (r *accountRepository) IncrementQuotaUsed(ctx context.Context, id int64, am
 		return err
 	}
 
-	// 任一维度配额刚超限时触发调度快照刷新
-	if limit > 0 && newUsed >= limit && (newUsed-amount) < limit {
+	// 任一维度配额刚超限时刷新调度快照。SQLite 个人部署不跑 outbox
+	// worker，只写 outbox 会让粘性会话继续打已超额账号。
+	justExceeded := accountQuotaJustExceeded(current.Type, before, extra)
+	if justExceeded {
 		if err := enqueueSchedulerOutbox(ctx, tx.Client(), service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
 			logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue quota exceeded failed: account=%d err=%v", id, err)
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if justExceeded {
+		r.syncSchedulerAccountSnapshotDetached(ctx, id)
+	}
+	return nil
+}
+
+func accountQuotaJustExceeded(accountType string, before, after map[string]any) bool {
+	if accountType != service.AccountTypeAPIKey && accountType != service.AccountTypeBedrock {
+		return false
+	}
+	prev := &service.Account{Type: accountType, Extra: before}
+	next := &service.Account{Type: accountType, Extra: after}
+	return !prev.IsQuotaExceeded() && next.IsQuotaExceeded()
 }
 
 // ResetQuotaUsed 重置账号所有维度的配额用量为 0
@@ -3448,6 +3465,7 @@ func (r *accountRepository) ResetQuotaUsed(ctx context.Context, id int64) error 
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
 		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue quota reset failed: account=%d err=%v", id, err)
 	}
+	r.syncSchedulerAccountSnapshotDetached(ctx, id)
 	return nil
 }
 
