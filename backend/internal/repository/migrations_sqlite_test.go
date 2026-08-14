@@ -4,8 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"io/fs"
 	"testing"
+	"testing/fstest"
+	"time"
 
+	"github.com/Wei-Shaw/sub2api/migrations"
 	"github.com/stretchr/testify/require"
 	_ "modernc.org/sqlite"
 )
@@ -67,4 +71,134 @@ func TestApplyMigrationsAcceptsLegacySeedChecksumsOnSQLite(t *testing.T) {
 	}
 
 	require.NoError(t, ApplyMigrations(ctx, db), "旧 checksum 的库必须能继续启动")
+}
+
+// modernc.org/sqlite only converts TEXT values to time.Time when the declared
+// column type is DATE/DATETIME/TIMESTAMP. TEXT stays a string, so Ent/database/sql
+// fails with: unsupported Scan, storing driver.Value type string into type *time.Time.
+func TestSQLiteTextTimestampCannotScanIntoTime(t *testing.T) {
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared&_time_format=sqlite", t.Name())
+	db, err := sql.Open("sqlite", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	_, err = db.Exec(`CREATE TABLE accounts_scan (
+		id INTEGER PRIMARY KEY,
+		temp_unschedulable_until TEXT
+	)`)
+	require.NoError(t, err)
+
+	until := time.Date(2026, 8, 14, 17, 23, 43, 380000000, time.FixedZone("CST", 8*3600))
+	_, err = db.Exec(`INSERT INTO accounts_scan (temp_unschedulable_until) VALUES ($1)`, until)
+	require.NoError(t, err)
+
+	var got *time.Time
+	err = db.QueryRow(`SELECT temp_unschedulable_until FROM accounts_scan`).Scan(&got)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), `unsupported Scan, storing driver.Value type string into type *time.Time`)
+}
+
+func TestApplyMigrationsConvertsTimestampTextColumnsForTimeScan(t *testing.T) {
+	ctx := context.Background()
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared&_pragma=foreign_keys(1)&_time_format=sqlite", t.Name())
+	db, err := sql.Open("sqlite", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	db.SetMaxOpenConns(1)
+
+	require.NoError(t, ApplyMigrations(ctx, db))
+
+	for _, column := range []struct {
+		table string
+		name  string
+	}{
+		{"accounts", "temp_unschedulable_until"},
+		{"accounts", "overload_until"},
+		{"accounts", "session_window_start"},
+		{"accounts", "session_window_end"},
+		{"api_keys", "window_5h_start"},
+		{"api_keys", "window_1d_start"},
+		{"api_keys", "window_7d_start"},
+	} {
+		require.Equal(t, "DATETIME", sqliteColumnDeclType(t, db, column.table, column.name),
+			"%s.%s must be DATETIME so modernc can scan into *time.Time", column.table, column.name)
+	}
+
+	until := time.Date(2026, 8, 14, 17, 23, 43, 380000000, time.FixedZone("CST", 8*3600))
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO accounts (name, platform, type, temp_unschedulable_until, overload_until, session_window_start, session_window_end)
+		VALUES ('scan-bug', 'openai', 'oauth', $1, $1, $1, $1)
+	`, until)
+	require.NoError(t, err)
+
+	var gotTemp, gotOverload, gotSessionStart, gotSessionEnd *time.Time
+	err = db.QueryRowContext(ctx, `
+		SELECT temp_unschedulable_until, overload_until, session_window_start, session_window_end
+		FROM accounts WHERE name = 'scan-bug'
+	`).Scan(&gotTemp, &gotOverload, &gotSessionStart, &gotSessionEnd)
+	require.NoError(t, err)
+	require.NotNil(t, gotTemp)
+	require.WithinDuration(t, until.UTC(), gotTemp.UTC(), time.Second)
+	require.NotNil(t, gotOverload)
+	require.NotNil(t, gotSessionStart)
+	require.NotNil(t, gotSessionEnd)
+}
+
+func TestApplyMigrationsUpgradesExistingTextTimestampsForTimeScan(t *testing.T) {
+	ctx := context.Background()
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared&_pragma=foreign_keys(1)&_time_format=sqlite", t.Name())
+	db, err := sql.Open("sqlite", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	db.SetMaxOpenConns(1)
+
+	require.NoError(t, applyMigrationsFS(ctx, db, migrationsWithout(t, "222_timestamp_text_to_datetime.sql")))
+	require.Equal(t, "TEXT", sqliteColumnDeclType(t, db, "accounts", "temp_unschedulable_until"))
+
+	until := time.Date(2026, 8, 14, 17, 23, 43, 380000000, time.FixedZone("CST", 8*3600))
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO accounts (name, platform, type, temp_unschedulable_until)
+		VALUES ('prod-text', 'openai', 'oauth', $1)
+	`, until)
+	require.NoError(t, err)
+
+	var before *time.Time
+	err = db.QueryRowContext(ctx, `SELECT temp_unschedulable_until FROM accounts WHERE name = 'prod-text'`).Scan(&before)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), `unsupported Scan, storing driver.Value type string into type *time.Time`)
+
+	require.NoError(t, ApplyMigrations(ctx, db))
+	require.Equal(t, "DATETIME", sqliteColumnDeclType(t, db, "accounts", "temp_unschedulable_until"))
+
+	var after *time.Time
+	err = db.QueryRowContext(ctx, `SELECT temp_unschedulable_until FROM accounts WHERE name = 'prod-text'`).Scan(&after)
+	require.NoError(t, err)
+	require.NotNil(t, after)
+	require.WithinDuration(t, until.UTC(), after.UTC(), time.Second)
+}
+
+func migrationsWithout(t *testing.T, skip string) fs.FS {
+	t.Helper()
+	files, err := fs.Glob(migrations.FS, "*.sql")
+	require.NoError(t, err)
+	mapped := fstest.MapFS{}
+	for _, name := range files {
+		if name == skip {
+			continue
+		}
+		data, readErr := fs.ReadFile(migrations.FS, name)
+		require.NoError(t, readErr)
+		mapped[name] = &fstest.MapFile{Data: data}
+	}
+	return mapped
+}
+
+func sqliteColumnDeclType(t *testing.T, db *sql.DB, table, column string) string {
+	t.Helper()
+	var declType string
+	err := db.QueryRow(`
+		SELECT type FROM pragma_table_info($1) WHERE name = $2
+	`, table, column).Scan(&declType)
+	require.NoError(t, err)
+	return declType
 }
