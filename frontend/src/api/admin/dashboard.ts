@@ -50,7 +50,7 @@ export interface TrendParams {
   granularity?: 'day' | 'hour'
   user_id?: number
   api_key_id?: number
-  model?: string
+  model?: string | null
   account_id?: number
   group_id?: number
   request_type?: UsageRequestType
@@ -81,7 +81,7 @@ export interface ModelStatsParams {
   end_date?: string
   user_id?: number
   api_key_id?: number
-  model?: string
+  model?: string | null
   model_source?: 'requested' | 'upstream' | 'mapping'
   account_id?: number
   group_id?: number

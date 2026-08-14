@@ -60,7 +60,7 @@ export interface TrendParams {
   end_date?: string
   granularity?: 'day' | 'hour'
   api_key_id?: number
-  model?: string
+  model?: string | null
   group_id?: number
   request_type?: UsageRequestType
   stream?: boolean
@@ -280,7 +280,7 @@ export async function getDashboardModels(params?: {
   start_date?: string
   end_date?: string
   api_key_id?: number
-  model?: string
+  model?: string | null
   model_source?: 'requested'
   group_id?: number
   request_type?: UsageRequestType

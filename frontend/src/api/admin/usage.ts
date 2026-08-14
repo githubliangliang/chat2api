@@ -121,7 +121,7 @@ export async function getStats(params: {
   api_key_id?: number
   account_id?: number
   group_id?: number
-  model?: string
+  model?: string | null
   request_type?: UsageRequestType
   stream?: boolean
   upstream_model_mismatch?: boolean

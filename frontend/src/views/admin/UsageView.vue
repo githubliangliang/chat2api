@@ -156,7 +156,7 @@
             :start-date="startDate"
             :end-date="endDate"
             :filters="breakdownFilters"
-            :model="filters.model"
+            :model="filters.model ?? undefined"
             @select-user="handleRankingSelectUser"
           />
         </div>
