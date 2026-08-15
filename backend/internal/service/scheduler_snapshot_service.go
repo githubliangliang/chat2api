@@ -225,7 +225,17 @@ func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, 
 		if err != nil {
 			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] cache read failed: bucket=%s err=%v", bucket.String(), err)
 		} else if hit {
-			return derefAccounts(cached), useMixed, nil
+			accounts := derefAccounts(cached)
+			if snapshotHasSchedulableAccount(accounts) {
+				return accounts, useMixed, nil
+			}
+			// A ready snapshot that only holds cooled-down accounts would
+			// otherwise zero the pool until process restart (embedded
+			// miniredis) or a later full rebuild. Treat it as a miss.
+			slog.Warn("scheduler snapshot had no schedulable accounts; reloading from db",
+				"bucket", bucket.String(),
+				"cached_count", len(accounts),
+			)
 		}
 		token, err := s.cache.CaptureBucketWriteToken(ctx, bucket)
 		if ctxErr := ctx.Err(); ctxErr != nil {
@@ -269,6 +279,15 @@ func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, 
 	}
 
 	return accounts, useMixed, nil
+}
+
+func snapshotHasSchedulableAccount(accounts []Account) bool {
+	for i := range accounts {
+		if accounts[i].IsSchedulable() {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *SchedulerSnapshotService) GetAccount(ctx context.Context, accountID int64) (*Account, error) {

@@ -394,3 +394,54 @@ func TestGatewaySelectAccountWithLoadAwareness_SkipsAntigravityGeminiFamilyRateL
 		t.Fatalf("expected scheduler to skip Gemini-family limited antigravity account 1, got %d", result.Account.ID)
 	}
 }
+
+func TestListSchedulableAccountsReloadsWhenSnapshotHasNoSchedulableAccount(t *testing.T) {
+	until := time.Now().Add(10 * time.Minute)
+	cooled := &Account{
+		ID:                     19,
+		Platform:               PlatformOpenAI,
+		Type:                   AccountTypeAPIKey,
+		Status:                 StatusActive,
+		Schedulable:            true,
+		TempUnschedulableUntil: &until,
+	}
+	sibling := Account{
+		ID:          16,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+	cache := &snapshotHydrationCache{snapshot: []*Account{cooled}}
+	repo := stubOpenAIAccountRepo{accounts: []Account{sibling, *cooled}}
+	cfg := &config.Config{}
+	cfg.Gateway.Scheduling.DbFallbackEnabled = true
+	svc := NewSchedulerSnapshotService(cache, nil, repo, nil, cfg)
+
+	groupID := int64(3)
+	accounts, _, err := svc.ListSchedulableAccounts(context.Background(), &groupID, PlatformOpenAI, false)
+	if err != nil {
+		t.Fatalf("ListSchedulableAccounts error: %v", err)
+	}
+	ids := make([]int64, 0, len(accounts))
+	for _, account := range accounts {
+		ids = append(ids, account.ID)
+	}
+	if len(ids) != 2 {
+		t.Fatalf("expected db fallback to return both accounts, got %v", ids)
+	}
+}
+
+func TestSnapshotHasSchedulableAccountIgnoresCooledDownAccounts(t *testing.T) {
+	until := time.Now().Add(time.Minute)
+	if snapshotHasSchedulableAccount([]Account{{
+		ID: 19, Status: StatusActive, Schedulable: true, TempUnschedulableUntil: &until,
+	}}) {
+		t.Fatal("cooled-down account must not count as schedulable")
+	}
+	if !snapshotHasSchedulableAccount([]Account{{
+		ID: 16, Status: StatusActive, Schedulable: true,
+	}}) {
+		t.Fatal("healthy account must count as schedulable")
+	}
+}
