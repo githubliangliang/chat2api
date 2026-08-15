@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestDecideAdminBootstrap(t *testing.T) {
@@ -223,6 +225,70 @@ func TestWriteConfigFileIncludesRedisUsername(t *testing.T) {
 
 	if !strings.Contains(string(data), "username: app-user") {
 		t.Fatalf("config missing Redis username, got:\n%s", string(data))
+	}
+}
+
+func TestWriteConfigFilePersistsRedisEnabledFlag(t *testing.T) {
+	tests := []struct {
+		name  string
+		redis RedisConfig
+		want  RedisConfig
+	}{
+		{
+			name:  "external redis stays enabled",
+			redis: RedisConfig{Host: "redis", Port: 6379, Password: "secret"},
+			want:  RedisConfig{Enabled: boolPtr(true), Host: "redis", Port: 6379, Password: "secret"},
+		},
+		{
+			name:  "disabled redis drops connection details",
+			redis: RedisConfig{Enabled: boolPtr(false), Host: "localhost", Port: 6379, Password: "secret", DB: 3, EnableTLS: true},
+			want:  RedisConfig{Enabled: boolPtr(false), Host: "", Port: 6379},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("DATA_DIR", t.TempDir())
+
+			if err := writeConfigFile(&SetupConfig{Redis: tc.redis}); err != nil {
+				t.Fatalf("writeConfigFile() error = %v", err)
+			}
+
+			data, err := os.ReadFile(GetConfigFilePath())
+			if err != nil {
+				t.Fatalf("ReadFile() error = %v", err)
+			}
+
+			var parsed struct {
+				Redis RedisConfig `yaml:"redis"`
+			}
+			if err := yaml.Unmarshal(data, &parsed); err != nil {
+				t.Fatalf("Unmarshal() error = %v, config:\n%s", err, string(data))
+			}
+
+			// The runtime default is redis.enabled=true, so the flag must always be explicit.
+			if parsed.Redis.Enabled == nil {
+				t.Fatalf("redis.enabled not written, got:\n%s", string(data))
+			}
+			if got, want := *parsed.Redis.Enabled, *tc.want.Enabled; got != want {
+				t.Fatalf("redis.enabled = %v, want %v", got, want)
+			}
+			if parsed.Redis.Host != tc.want.Host {
+				t.Fatalf("redis.host = %q, want %q", parsed.Redis.Host, tc.want.Host)
+			}
+			if parsed.Redis.Port != tc.want.Port {
+				t.Fatalf("redis.port = %d, want %d", parsed.Redis.Port, tc.want.Port)
+			}
+			if parsed.Redis.Password != tc.want.Password {
+				t.Fatalf("redis.password = %q, want %q", parsed.Redis.Password, tc.want.Password)
+			}
+			if parsed.Redis.DB != tc.want.DB {
+				t.Fatalf("redis.db = %d, want %d", parsed.Redis.DB, tc.want.DB)
+			}
+			if parsed.Redis.EnableTLS != tc.want.EnableTLS {
+				t.Fatalf("redis.enable_tls = %v, want %v", parsed.Redis.EnableTLS, tc.want.EnableTLS)
+			}
+		})
 	}
 }
 

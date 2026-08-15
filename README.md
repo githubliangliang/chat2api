@@ -24,7 +24,7 @@
 | **SQLite only** | 运行时只打开 SQLite（`modernc.org/sqlite`）。`database.driver` / `DATABASE_DRIVER` 即使写成 `postgres` 也会被忽略 |
 | **安装向导** | Web / CLI / `AUTO_SETUP` 只收集 SQLite 文件路径，不再要 host/port/user/ssl |
 | **备份** | 管理页备份用 `VACUUM INTO` 打 `*.db.gz`；镜像不再带 `pg_dump` / `psql` |
-| **Redis 可选** | `REDIS_ENABLED=false` 时使用进程内嵌入式 Redis（仅单机） |
+| **Redis 可选** | `REDIS_ENABLED=false` 时使用进程内嵌入式 Redis（仅单机）；Web 向导第 2 步有「使用外部 Redis」开关，默认关闭 |
 | **菜单可隐藏** | 设置项 `hidden_menu_keys` + 管理页「菜单管理」 |
 | **用量落库** | 补齐 `usage_logs` 幂等索引与 `usage_billing_dedup` 表，避免请求成功但不写 usage |
 | **支付页清理** | 已移除对下线接口 `/admin/payment/providers` 的前端请求 |

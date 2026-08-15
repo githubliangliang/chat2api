@@ -158,8 +158,12 @@ func RunCLI() error {
 	fmt.Println()
 	fmt.Println("── Configuration Summary ──")
 	fmt.Printf("Database: %s@%s:%d/%s\n", cfg.Database.User, cfg.Database.Host, cfg.Database.Port, cfg.Database.DBName)
-	fmt.Printf("Redis: %s:%d\n", cfg.Redis.Host, cfg.Redis.Port)
-	fmt.Printf("Redis TLS: %s\n", map[bool]string{true: "enabled", false: "disabled"}[cfg.Redis.EnableTLS])
+	if cfg.Redis.IsEnabled() {
+		fmt.Printf("Redis: %s:%d\n", cfg.Redis.Host, cfg.Redis.Port)
+		fmt.Printf("Redis TLS: %s\n", map[bool]string{true: "enabled", false: "disabled"}[cfg.Redis.EnableTLS])
+	} else {
+		fmt.Println("Redis: embedded (in-process, single-node only)")
+	}
 	fmt.Printf("Admin: %s\n", cfg.Admin.Email)
 	fmt.Printf("Server: :%d\n", cfg.Server.Port)
 	fmt.Println()

@@ -24,6 +24,8 @@ export interface DatabaseConfig {
 }
 
 export interface RedisConfig {
+  /** false → embedded in-process Redis at runtime (single-node only) */
+  enabled: boolean
   host: string
   port: number
   username: string

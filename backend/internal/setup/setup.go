@@ -463,12 +463,36 @@ func createAdminUser(cfg *SetupConfig) (bool, string, error) {
 	return true, decision.reason, nil
 }
 
+// normalizeRedisForConfigFile returns the Redis block to persist in config.yaml.
+//
+// The runtime default is redis.enabled=true (viper), so an omitted flag would
+// silently re-enable external Redis after an install that opted out. Always
+// write the flag explicitly, and drop connection details when disabled so the
+// embedded in-process Redis is used at runtime.
+func normalizeRedisForConfigFile(cfg RedisConfig) RedisConfig {
+	enabled := cfg.IsEnabled()
+	cfg.Enabled = boolPtr(enabled)
+	if !enabled {
+		cfg.Host = ""
+		cfg.Username = ""
+		cfg.Password = ""
+		cfg.DB = 0
+		cfg.EnableTLS = false
+		if cfg.Port == 0 {
+			cfg.Port = 6379
+		}
+	}
+	return cfg
+}
+
 func writeConfigFile(cfg *SetupConfig) error {
 	// Ensure timezone has a default value
 	tz := cfg.Timezone
 	if tz == "" {
 		tz = "Asia/Shanghai"
 	}
+
+	redisCfg := normalizeRedisForConfigFile(cfg.Redis)
 
 	// Prepare config for YAML (exclude sensitive data and admin config)
 	yamlConfig := struct {
@@ -493,7 +517,7 @@ func writeConfigFile(cfg *SetupConfig) error {
 	}{
 		Server:   cfg.Server,
 		Database: cfg.Database,
-		Redis:    cfg.Redis,
+		Redis:    redisCfg,
 		JWT: struct {
 			Secret     string `yaml:"secret"`
 			ExpireHour int    `yaml:"expire_hour"`

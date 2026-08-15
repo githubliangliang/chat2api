@@ -201,7 +201,11 @@ export default {
     },
     redis: {
       title: 'Redis 配置',
-      description: '连接到您的 Redis 服务器',
+      description: 'Redis 为可选组件，可使用外部 Redis 或进程内嵌入式 Redis',
+      useExternal: '使用外部 Redis',
+      useExternalHint: '关闭后使用进程内嵌入式 Redis，仅适用于单机部署',
+      embedded: '嵌入式 Redis（单机）',
+      embeddedNotice: '将使用进程内嵌入式 Redis，无需额外安装 Redis 服务。注意：多实例部署无法共享状态，请改用外部 Redis。',
       host: '主机',
       port: '端口',
       username: '用户名（可选）',

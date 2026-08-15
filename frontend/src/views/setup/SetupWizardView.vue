@@ -127,109 +127,136 @@
             </p>
           </div>
 
-          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div>
-              <label class="input-label">{{ t('setup.redis.host') }}</label>
-              <input
-                v-model="formData.redis.host"
-                type="text"
-                class="input"
-                placeholder="localhost"
-              />
-            </div>
-            <div>
-              <label class="input-label">{{ t('setup.redis.port') }}</label>
-              <input
-                v-model.number="formData.redis.port"
-                type="number"
-                class="input"
-                placeholder="6379"
-              />
-            </div>
-          </div>
-
-          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div>
-              <label class="input-label">{{ t('setup.redis.username') }}</label>
-              <input
-                v-model="formData.redis.username"
-                type="text"
-                class="input"
-                :placeholder="t('setup.redis.usernamePlaceholder')"
-              />
-            </div>
-            <div>
-              <label class="input-label">{{ t('setup.redis.password') }}</label>
-              <input
-                v-model="formData.redis.password"
-                type="password"
-                class="input"
-                :placeholder="t('setup.redis.passwordPlaceholder')"
-              />
-            </div>
-            <div>
-              <label class="input-label">{{ t('setup.redis.database') }}</label>
-              <input
-                v-model.number="formData.redis.db"
-                type="number"
-                class="input"
-                placeholder="0"
-              />
-            </div>
-          </div>
-
-          <div class="flex items-center justify-between rounded-xl border border-gray-200 p-3 dark:border-dark-700">
+          <div
+            class="flex items-center justify-between rounded-xl border border-gray-200 p-3 dark:border-dark-700"
+          >
             <div>
               <p class="text-sm font-medium text-gray-900 dark:text-white">
-                {{ t("setup.redis.enableTls") }}
+                {{ t('setup.redis.useExternal') }}
               </p>
               <p class="text-xs text-gray-500 dark:text-dark-400">
-                {{ t("setup.redis.enableTlsHint") }}
+                {{ t('setup.redis.useExternalHint') }}
               </p>
             </div>
-            <Toggle v-model="formData.redis.enable_tls" />
+            <Toggle v-model="formData.redis.enabled" data-test="redis-enabled-toggle" />
           </div>
 
-          <button
-            @click="testRedisConnection"
-            :disabled="testingRedis"
-            class="btn btn-secondary w-full"
+          <div
+            v-if="!formData.redis.enabled"
+            class="rounded-xl border border-primary-200 bg-primary-50 p-4 dark:border-primary-800/50 dark:bg-primary-900/20"
           >
-            <svg
-              v-if="testingRedis"
-              class="-ml-1 mr-2 h-4 w-4 animate-spin"
-              fill="none"
-              viewBox="0 0 24 24"
+            <p class="text-sm text-primary-700 dark:text-primary-300">
+              {{ t('setup.redis.embeddedNotice') }}
+            </p>
+          </div>
+
+          <template v-else>
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <label class="input-label">{{ t('setup.redis.host') }}</label>
+                <input
+                  v-model="formData.redis.host"
+                  type="text"
+                  class="input"
+                  placeholder="localhost"
+                />
+              </div>
+              <div>
+                <label class="input-label">{{ t('setup.redis.port') }}</label>
+                <input
+                  v-model.number="formData.redis.port"
+                  type="number"
+                  class="input"
+                  placeholder="6379"
+                />
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <label class="input-label">{{ t('setup.redis.username') }}</label>
+                <input
+                  v-model="formData.redis.username"
+                  type="text"
+                  class="input"
+                  :placeholder="t('setup.redis.usernamePlaceholder')"
+                />
+              </div>
+              <div>
+                <label class="input-label">{{ t('setup.redis.password') }}</label>
+                <input
+                  v-model="formData.redis.password"
+                  type="password"
+                  class="input"
+                  :placeholder="t('setup.redis.passwordPlaceholder')"
+                />
+              </div>
+              <div>
+                <label class="input-label">{{ t('setup.redis.database') }}</label>
+                <input
+                  v-model.number="formData.redis.db"
+                  type="number"
+                  class="input"
+                  placeholder="0"
+                />
+              </div>
+            </div>
+
+            <div
+              class="flex items-center justify-between rounded-xl border border-gray-200 p-3 dark:border-dark-700"
             >
-              <circle
-                class="opacity-25"
-                cx="12"
-                cy="12"
-                r="10"
-                stroke="currentColor"
-                stroke-width="4"
-              ></circle>
-              <path
-                class="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-              ></path>
-            </svg>
-            <Icon
-              v-else-if="redisConnected"
-              name="check"
-              size="md"
-              class="mr-2 text-green-500"
-              :stroke-width="2"
-            />
-            {{
-              testingRedis
-                ? t('setup.status.testing')
-                : redisConnected
-                  ? t('setup.status.success')
-                  : t('setup.status.testConnection')
-            }}
-          </button>
+              <div>
+                <p class="text-sm font-medium text-gray-900 dark:text-white">
+                  {{ t("setup.redis.enableTls") }}
+                </p>
+                <p class="text-xs text-gray-500 dark:text-dark-400">
+                  {{ t("setup.redis.enableTlsHint") }}
+                </p>
+              </div>
+              <Toggle v-model="formData.redis.enable_tls" />
+            </div>
+
+            <button
+              @click="testRedisConnection"
+              :disabled="testingRedis"
+              class="btn btn-secondary w-full"
+            >
+              <svg
+                v-if="testingRedis"
+                class="-ml-1 mr-2 h-4 w-4 animate-spin"
+                fill="none"
+                viewBox="0 0 24 24"
+              >
+                <circle
+                  class="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  stroke-width="4"
+                ></circle>
+                <path
+                  class="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                ></path>
+              </svg>
+              <Icon
+                v-else-if="redisConnected"
+                name="check"
+                size="md"
+                class="mr-2 text-green-500"
+                :stroke-width="2"
+              />
+              {{
+                testingRedis
+                  ? t('setup.status.testing')
+                  : redisConnected
+                    ? t('setup.status.success')
+                    : t('setup.status.testConnection')
+              }}
+            </button>
+          </template>
         </div>
 
         <!-- Step 3: Admin -->
@@ -306,7 +333,11 @@
                 {{ t('setup.ready.redis') }}
               </h3>
               <p class="text-gray-900 dark:text-white">
-                {{ formData.redis.host }}:{{ formData.redis.port }}
+                {{
+                  formData.redis.enabled
+                    ? `${formData.redis.host}:${formData.redis.port}`
+                    : t('setup.redis.embedded')
+                }}
               </p>
             </div>
 
@@ -429,7 +460,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { testDatabase, testRedis, install, type InstallRequest } from '@/api/setup'
 import { buildGatewayUrl } from '@/api/client'
@@ -474,6 +505,8 @@ const formData = reactive<InstallRequest>({
     path: './data/sub2api.db'
   },
   redis: {
+    // Off by default: single-node deployments use the embedded in-process Redis.
+    enabled: false,
     host: 'localhost',
     port: 6379,
     username: '',
@@ -497,7 +530,8 @@ const canProceed = computed(() => {
     case 0:
       return dbConnected.value
     case 1:
-      return redisConnected.value
+      // Embedded Redis needs no connectivity check.
+      return !formData.redis.enabled || redisConnected.value
     case 2:
       return (
         formData.admin.email &&
@@ -508,6 +542,15 @@ const canProceed = computed(() => {
       return true
   }
 })
+
+// Toggling the Redis mode invalidates any earlier connection test.
+watch(
+  () => formData.redis.enabled,
+  () => {
+    redisConnected.value = false
+    errorMessage.value = ''
+  }
+)
 
 async function testDatabaseConnection() {
   testingDb.value = true

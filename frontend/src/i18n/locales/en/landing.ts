@@ -201,7 +201,11 @@ export default {
     },
     redis: {
       title: 'Redis Configuration',
-      description: 'Connect to your Redis server',
+      description: 'Redis is optional: use an external server or the embedded in-process one',
+      useExternal: 'Use external Redis',
+      useExternalHint: 'When off, an embedded in-process Redis is used (single-node only)',
+      embedded: 'Embedded Redis (single-node)',
+      embeddedNotice: 'An embedded in-process Redis will be used, so no Redis server is required. Note: state cannot be shared across instances — use an external Redis for multi-instance deployments.',
       host: 'Host',
       port: 'Port',
       username: 'Username (optional)',
