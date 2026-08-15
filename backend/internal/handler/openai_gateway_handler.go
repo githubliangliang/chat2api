@@ -779,6 +779,9 @@ func (h *OpenAIGatewayHandler) normalizeOpenAIResponsesCompactRequest(c *gin.Con
 	isCompactRequest := service.IsOpenAIResponsesCompactPathForTest(c)
 	if !isCompactRequest && isBareOpenAIResponsesPath(c) && service.HasCompactionTriggerInInput(body) {
 		if isOpenAIRemoteCompactionV2Request(c, body) {
+			// 原生 v2 压缩出站前补注 x-codex-beta-features: remote_compaction_v2，
+			// 与真实 Codex 线型一致（网关链剥头后本级负责恢复）。
+			service.MarkOpenAINativeCompactionV2(c)
 			return body, true
 		}
 		c.Request.URL.Path = strings.TrimRight(c.Request.URL.Path, "/") + "/compact"

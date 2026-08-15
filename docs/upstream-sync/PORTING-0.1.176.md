@@ -216,14 +216,14 @@ cd ../frontend && pnpm run typecheck && pnpm run lint:check
 | Grok 长上下文只跟分组开关，不被 OpenAI 账号开关否决 | `fd82dfd5`（#5573） | **已合**（随 P2 一起带） |
 | 未知 Grok 文本兜底排除 image/video/audio | `e29b93a1`（#5573） | **已合**（随 P0 一起带） |
 | relay `x-codex-turn-state`、防跨账号 echo | `8219dcfc` + 测试补丁 `4d9fedee`（#5668） | **已合**（2026-08-15）：`openai_codex_turn_state.go` + 响应侧 relay（流式 / 非流式 / SSE→JSON / 透传写头）+ 出站守卫。测试取 `8219dcfc` 版本并剔掉属于下一项的 beta 头用例 |
-| session-level beta features + 探测 native compaction v2 | `8ae6d8f6`（#5668） | **值得合，次优先**。本地 compact 探测仍打 legacy unary `/responses/compact`，该端点上游已下线（恒 404，#5598/#5624），管理页探测现在会把健康账号误判失败；beta 头「只在 compact 回合出现」的形态也有 #5586 风控风险。注意它依赖 fingerprint 收敛（探测身份套用账号收敛），先合下面一条 |
+| session-level beta features + 探测 native compaction v2 | `8ae6d8f6`（#5668） | **已合**（2026-08-15）：探测改打流式 `/responses` + `compaction_trigger`，2xx 无 compaction item 记为不支持；`x-codex-beta-features` 在 HTTP / 透传 / WS 三处按会话级补注；`compactProbeSessionID` 改 UUID 派生 |
 | Codex fingerprint 改成 **opt-in，默认 off**，并覆盖透传 | `fce41e31`（#5668） | **已合**（2026-08-15）：`openai_codex_fingerprint.go` 取 v0.1.177 最终版；Forward / 透传两条路径共享同一份收敛 ID；只合指纹，同提交里的 turn-state 与 beta 头留给下一项 |
 | 保留 remote compaction v2、native/legacy 分流 | `9662cff2` / `a8b9ea22`（#5641） | **大部分已有，暂缓**。本地 `normalizeOpenAIResponsesCompactRequest` 已让 native v2 保持裸 `/responses` 直通（9662cff2 的核心）；缺的只有 `openai_compaction_context.go`（渠道限制按 forward model 判定的窄修复）。合 `8ae6d8f6` 时若冲突再顺手带 |
 | 分组用量日聚合 + 时区 | `cb7b0379` 等（#5649） | **不合**：本 fork 刚藏过用量筛选/图表，且聚合 SQL 面向 PG |
 | 账号页自动刷新偏好改为模块初始化时恢复 | `e215c98c`（#5573） | 可跳过：28 行前端小改，本 fork AccountsView 已简化，收益低 |
 | CI 里 Go **1.26.6** | 见 #5649 相关 CI 修复 | 低优先级 chore。本地 go.mod + 4 个 workflow 仍写死 `1.26.5`，升则一起改 |
 
-推荐合入顺序：① fingerprint（已合）→ ② turn-state relay + echo 守卫（已合）→ ③ compact 探测 v2 + beta 头。三者都在 #5668 内，文件互不重叠但语义相关。
+推荐合入顺序：① fingerprint（已合）→ ② turn-state relay + echo 守卫（已合）→ ③ compact 探测 v2 + beta 头（已合）。三者都在 #5668 内，文件互不重叠但语义相关。
 
 ---
 
