@@ -259,3 +259,39 @@ describe('UsageFilters — model options come from prop (no dup request)', () =>
     expect(opts.map((o) => o.value)).toEqual([null, 'claude-3', 'gpt-4o'])
   })
 })
+
+describe('UsageFilters — usage tab hides billing/type filters', () => {
+  function mountWithMode(mode: 'usage' | 'errors' | 'ranking') {
+    return mount(UsageFilters, {
+      props: {
+        modelValue: defaultFilters(),
+        exporting: false,
+        startDate: '2026-05-01',
+        endDate: '2026-05-28',
+        showActions: false,
+        modelOptions: [],
+        mode,
+      },
+      global: { stubs: { Select: true, Teleport: true } },
+    })
+  }
+
+  it('hides type, billing type, billing mode, and upstream model audit on usage details', () => {
+    const wrapper = mountWithMode('usage')
+    const text = wrapper.text()
+    expect(text).not.toContain('Type')
+    expect(text).not.toContain('Billing Type')
+    expect(text).not.toContain('Billing Mode')
+    expect(text).not.toContain('Upstream model audit')
+  })
+
+  it('keeps type and billing type on the ranking tab', () => {
+    const wrapper = mountWithMode('ranking')
+    const text = wrapper.text()
+    expect(text).toContain('Type')
+    expect(text).toContain('Billing Type')
+    expect(text).not.toContain('Billing Mode')
+    expect(text).not.toContain('Upstream model audit')
+  })
+})
+

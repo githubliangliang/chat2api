@@ -121,27 +121,15 @@
           </div>
         </div>
 
-        <!-- Request Type Filter (usage only) -->
-        <div v-if="mode !== 'errors'" class="w-full sm:w-auto sm:min-w-[180px]">
+        <!-- Request Type / Billing Type: ranking only. Hidden on usage details. -->
+        <div v-if="mode === 'ranking'" class="w-full sm:w-auto sm:min-w-[180px]">
           <label class="input-label">{{ t('usage.type') }}</label>
           <Select v-model="filters.request_type" :options="requestTypeOptions" @change="emitChange" />
         </div>
 
-        <!-- Billing Type Filter (usage only) -->
-        <div v-if="mode !== 'errors'" class="w-full sm:w-auto sm:min-w-[200px]">
+        <div v-if="mode === 'ranking'" class="w-full sm:w-auto sm:min-w-[200px]">
           <label class="input-label">{{ t('admin.usage.billingType') }}</label>
           <Select v-model="filters.billing_type" :options="billingTypeOptions" @change="emitChange" />
-        </div>
-
-        <!-- Billing Mode Filter (usage only；用户排行的 user-breakdown 接口不支持该维度) -->
-        <div v-if="mode === 'usage'" class="w-full sm:w-auto sm:min-w-[200px]">
-          <label class="input-label">{{ t('admin.usage.billingMode') }}</label>
-          <Select v-model="filters.billing_mode" :options="billingModeOptions" @change="emitChange" />
-        </div>
-
-        <div v-if="mode === 'usage'" class="w-full sm:w-auto sm:min-w-[220px]">
-          <label class="input-label">{{ t('admin.usage.upstreamModelAudit') }}</label>
-          <Select v-model="filters.upstream_model_mismatch" :options="upstreamModelMismatchOptions" @change="emitChange" />
         </div>
 
         <!-- Error Phase Filter (errors only) -->
@@ -210,8 +198,9 @@ interface Props {
   showActions?: boolean
   modelOptions?: string[]
   /**
-   * errors 模式:隐藏用量专属字段/按钮,显示错误类型+状态码(错误请求 tab 用)
-   * ranking 模式:同 usage 但隐藏计费模式筛选与清理/导出按钮(用户排行 tab 用)
+   * usage 模式:用量明细。隐藏类型/计费类型/计费模式/上游模型审计
+   * errors 模式:显示错误类型+状态码(错误请求 tab 用)
+   * ranking 模式:显示类型/计费类型,隐藏清理/导出按钮(用户排行 tab 用)
    */
   mode?: 'usage' | 'errors' | 'ranking'
   /** 嵌入统一卡片内使用：去掉自身卡片外观 */
@@ -302,20 +291,6 @@ const errorCategoryOptions = computed<SelectOption[]>(() => [
 const statusCodeOptions = computed<SelectOption[]>(() => [
   { value: null, label: t('usage.errors.allStatuses') },
   ...COMMON_ERROR_STATUS_CODES.map((c) => ({ value: c, label: String(c) })),
-])
-
-const billingModeOptions = ref<SelectOption[]>([
-  { value: null, label: t('admin.usage.allBillingModes') },
-  { value: 'token', label: t('admin.usage.billingModeToken') },
-  { value: 'per_request', label: t('admin.usage.billingModePerRequest') },
-  { value: 'image', label: t('admin.usage.billingModeImage') },
-  { value: 'video', label: t('admin.usage.billingModeVideo') }
-])
-
-const upstreamModelMismatchOptions = ref<SelectOption[]>([
-  { value: null, label: t('admin.usage.allUpstreamModelAudit') },
-  { value: true, label: t('admin.usage.upstreamModelMismatchOnly') },
-  { value: false, label: t('admin.usage.upstreamModelMatchedOnly') }
 ])
 
 const emitChange = () => emit('change')
