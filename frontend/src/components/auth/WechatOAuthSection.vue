@@ -34,6 +34,7 @@ import { useI18n } from 'vue-i18n'
 import { resolveWeChatOAuthStart, type OAuthLoginStart } from '@/api/auth'
 import { useAppStore } from '@/stores'
 import { resolveAffiliateReferralCode, storeOAuthAffiliateCode } from '@/utils/oauthAffiliate'
+import { resolveUserHomePath } from '@/utils/userHomePath'
 
 const props = withDefaults(defineProps<{
   disabled?: boolean
@@ -88,7 +89,9 @@ function startLogin(): void {
   if (buttonDisabled.value || !resolvedStart.value.mode) {
     return
   }
-  const redirectTo = (route.query.redirect as string) || '/dashboard'
+  const redirectTo =
+    (route.query.redirect as string) ||
+    resolveUserHomePath({ hiddenMenuKeys: appStore.cachedPublicSettings?.hidden_menu_keys })
   storeOAuthAffiliateCode(resolveAffiliateReferralCode(props.affCode, route.query.aff, route.query.aff_code))
   const mode = resolvedStart.value.mode
   emit('start', {

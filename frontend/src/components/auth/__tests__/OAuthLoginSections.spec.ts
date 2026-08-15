@@ -18,6 +18,12 @@ vi.mock('vue-i18n', () => ({
   })
 }))
 
+vi.mock('@/stores', () => ({
+  useAppStore: () => ({
+    cachedPublicSettings: null,
+  }),
+}))
+
 describe('OAuth login sections', () => {
   beforeEach(() => {
     routeState.query = { redirect: '/billing?plan=pro', aff: 'AFF123' }

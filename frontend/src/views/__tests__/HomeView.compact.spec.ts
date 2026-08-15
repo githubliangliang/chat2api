@@ -110,12 +110,22 @@ describe('HomeView compact mode', () => {
     expect(compactDestination(mountHome({ compact_home_enabled: true }))).toBe('/dashboard')
   })
 
-  it('links administrators to the admin dashboard', () => {
+  it('links authenticated users to the first visible menu when dashboard is hidden', () => {
+    authStore.isAuthenticated = true
+
+    expect(
+      compactDestination(
+        mountHome({ compact_home_enabled: true, hidden_menu_keys: ['/dashboard'] }),
+      ),
+    ).toBe('/keys')
+  })
+
+  it('links administrators to the admin home', () => {
     authStore.isAuthenticated = true
     authStore.isAdmin = true
 
     const wrapper = mountHome({ compact_home_enabled: true })
-    expect(compactDestination(wrapper)).toBe('/admin/dashboard')
+    expect(compactDestination(wrapper)).toBe('/admin/accounts')
     expect(authStore.checkAuth).toHaveBeenCalledOnce()
     expect(appStore.fetchPublicSettings).not.toHaveBeenCalled()
   })

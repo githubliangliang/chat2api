@@ -384,7 +384,7 @@ describe('路由守卫逻辑', () => {
       expect(redirect).toBeNull()
     })
 
-    it('unauthenticated: initialized /setup redirects to /login', () => {
+    it('unauthenticated: initialized /setup redirects to the user home', () => {
       const authState: MockAuthState = {
         isAuthenticated: false,
         isAdmin: false,
@@ -394,10 +394,10 @@ describe('路由守卫逻辑', () => {
         setupNeedsSetup: false,
       }
       const redirect = simulateGuard('/setup', { requiresAuth: false }, authState)
-      expect(redirect).toBe('/login')
+      expect(redirect).toBe('/dashboard')
     })
 
-    it('admin: initialized /setup redirects to /admin/dashboard', () => {
+    it('admin: initialized /setup redirects to the admin home', () => {
       const authState: MockAuthState = {
         isAuthenticated: true,
         isAdmin: true,
@@ -407,7 +407,7 @@ describe('路由守卫逻辑', () => {
         setupNeedsSetup: false,
       }
       const redirect = simulateGuard('/setup', { requiresAuth: false }, authState)
-      expect(redirect).toBe('/admin/dashboard')
+      expect(redirect).toBe('/admin/accounts')
     })
 
     it('admin: /admin/dashboard is allowed', () => {

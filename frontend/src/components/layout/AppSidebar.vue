@@ -195,6 +195,7 @@ import { sanitizeSvg } from '@/utils/sanitize'
 import { sanitizeUrl } from '@/utils/url'
 import { FeatureFlags, makeSidebarFlag } from '@/utils/featureFlags'
 import { useBatchImageAccess } from '@/composables/useBatchImageAccess'
+import { currentSignedInHomePath } from '@/utils/userHomePathStore'
 
 interface NavItem {
   path: string
@@ -248,7 +249,7 @@ const isAdmin = computed(() => authStore.isAdmin)
 const sidebarNavRef = ref<HTMLElement | null>(null)
 const isDark = ref(document.documentElement.classList.contains('dark'))
 
-const homePath = computed(() => (isAdmin.value ? '/admin/accounts' : '/dashboard'))
+const homePath = computed(() => currentSignedInHomePath())
 
 // Track which parent nav groups are expanded
 const expandedGroups = ref<Set<string>>(new Set())

@@ -37,6 +37,7 @@ import {
   type PendingOAuthExchangeResponse
 } from '@/api/auth'
 import { clearAllAffiliateReferralCodes } from '@/utils/oauthAffiliate'
+import { resolveUserHomePath, sanitizeInternalRedirectPath } from '@/utils/userHomePath'
 
 const route = useRoute()
 const router = useRouter()
@@ -50,13 +51,14 @@ const accountActionError = ref('')
 
 const initialEmail = (route.query.email as string | undefined) || ''
 
+function defaultHomePath(): string {
+  return resolveUserHomePath({
+    hiddenMenuKeys: appStore.cachedPublicSettings?.hidden_menu_keys,
+  })
+}
+
 function sanitizeRedirectPath(path: string | null | undefined): string {
-  if (!path) return '/dashboard'
-  if (!path.startsWith('/')) return '/dashboard'
-  if (path.startsWith('//')) return '/dashboard'
-  if (path.includes('://')) return '/dashboard'
-  if (path.includes('\n') || path.includes('\r')) return '/dashboard'
-  return path
+  return sanitizeInternalRedirectPath(path, defaultHomePath())
 }
 
 function getRequestErrorMessage(error: unknown, fallback: string): string {

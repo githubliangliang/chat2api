@@ -259,6 +259,7 @@ import {
   loadOAuthAffiliateCode,
   oauthAffiliatePayload
 } from '@/utils/oauthAffiliate'
+import { resolveUserHomePath, sanitizeInternalRedirectPath } from '@/utils/userHomePath'
 
 const route = useRoute()
 const router = useRouter()
@@ -275,7 +276,7 @@ const needsInvitation = ref(false)
 const invitationCode = ref('')
 const isSubmitting = ref(false)
 const invitationError = ref('')
-const redirectTo = ref('/dashboard')
+const redirectTo = ref('')
 const adoptionRequired = ref(false)
 const suggestedDisplayName = ref('')
 const suggestedAvatarUrl = ref('')
@@ -378,13 +379,14 @@ function readLegacyFragmentLogin(params: URLSearchParams): OAuthTokenResponse | 
   return completion
 }
 
+function defaultHomePath(): string {
+  return resolveUserHomePath({
+    hiddenMenuKeys: appStore.cachedPublicSettings?.hidden_menu_keys,
+  })
+}
+
 function sanitizeRedirectPath(path: string | null | undefined): string {
-  if (!path) return '/dashboard'
-  if (!path.startsWith('/')) return '/dashboard'
-  if (path.startsWith('//')) return '/dashboard'
-  if (path.includes('://')) return '/dashboard'
-  if (path.includes('\n') || path.includes('\r')) return '/dashboard'
-  return path
+  return sanitizeInternalRedirectPath(path, defaultHomePath())
 }
 
 function currentAdoptionDecision(): OAuthAdoptionDecision {
@@ -741,7 +743,7 @@ async function handleSubmitTotpChallenge() {
     await authStore.setToken(completion.access_token)
     clearAllAffiliateReferralCodes()
     appStore.showSuccess(t('auth.loginSuccess'))
-    await router.replace(redirectTo.value)
+    await router.replace(sanitizeRedirectPath(redirectTo.value))
   } catch (e: unknown) {
     totpError.value = getRequestErrorMessage(e, t('auth.loginFailed'))
   } finally {
@@ -756,7 +758,7 @@ onMounted(async () => {
   const error = params.get('error')
   const errorDesc = params.get('error_description') || params.get('error_message') || ''
   const redirect = sanitizeRedirectPath(
-    params.get('redirect') || (route.query.redirect as string | undefined) || '/dashboard'
+    params.get('redirect') || (route.query.redirect as string | undefined)
   )
 
   try {
@@ -786,7 +788,7 @@ onMounted(async () => {
 
     const completion = await exchangePendingOAuthCompletion()
     const completionRedirect = sanitizeRedirectPath(
-      completion.redirect || (route.query.redirect as string | undefined) || '/dashboard'
+      completion.redirect || (route.query.redirect as string | undefined)
     )
     applyAdoptionSuggestionState(completion)
     redirectTo.value = completionRedirect

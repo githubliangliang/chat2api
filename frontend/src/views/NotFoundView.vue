@@ -57,7 +57,7 @@
           <Icon name="arrowLeft" size="md" class="mr-2" />
           Go Back
         </button>
-        <router-link to="/dashboard" class="btn btn-primary">
+        <router-link :to="homePath" class="btn btn-primary">
           <Icon name="home" size="md" class="mr-2" />
           Go to Dashboard
         </router-link>
@@ -78,12 +78,15 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import Icon from '@/components/icons/Icon.vue'
+import { currentSignedInHomePath } from '@/utils/userHomePathStore'
 
 const { t } = useI18n()
 const router = useRouter()
+const homePath = computed(() => currentSignedInHomePath())
 
 function goBack(): void {
   router.back()

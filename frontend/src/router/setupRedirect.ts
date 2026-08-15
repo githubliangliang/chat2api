@@ -1,7 +1,10 @@
+import { resolveSignedInHomePath } from '@/utils/userHomePath'
+
 export function resolveCompletedSetupRedirectPath(
   _isAuthenticated: boolean,
   isAdmin: boolean,
+  hiddenMenuKeys?: Iterable<string>,
+  isSimpleMode?: boolean,
 ): string {
-  // Admin home after removing /admin/dashboard
-  return isAdmin ? '/admin/accounts' : '/dashboard'
+  return resolveSignedInHomePath({ isAdmin, hiddenMenuKeys, isSimpleMode })
 }

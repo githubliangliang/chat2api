@@ -32,7 +32,9 @@ import { useI18n } from 'vue-i18n'
 import GitHubMark from './GitHubMark.vue'
 import GoogleMark from './GoogleMark.vue'
 import type { OAuthLoginStart } from '@/api/auth'
+import { useAppStore } from '@/stores'
 import { resolveAffiliateReferralCode, storeOAuthAffiliateCode } from '@/utils/oauthAffiliate'
+import { resolveUserHomePath } from '@/utils/userHomePath'
 
 type EmailOAuthProvider = 'github' | 'google'
 const EMAIL_OAUTH_PENDING_PROVIDER_KEY = 'email_oauth_pending_provider'
@@ -52,6 +54,7 @@ const emit = defineEmits<{
 
 const route = useRoute()
 const { t } = useI18n()
+const appStore = useAppStore()
 
 const visibleProviders = computed<EmailOAuthProvider[]>(() => {
   const providers: EmailOAuthProvider[] = []
@@ -75,7 +78,9 @@ function providerLabel(provider: EmailOAuthProvider): string {
 }
 
 function startLogin(provider: EmailOAuthProvider): void {
-  const redirectTo = (route.query.redirect as string) || '/dashboard'
+  const redirectTo =
+    (route.query.redirect as string) ||
+    resolveUserHomePath({ hiddenMenuKeys: appStore.cachedPublicSettings?.hidden_menu_keys })
   const affiliateCode = resolveAffiliateReferralCode(props.affCode, route.query.aff, route.query.aff_code)
   storeOAuthAffiliateCode(affiliateCode)
   window.sessionStorage.setItem(EMAIL_OAUTH_PENDING_PROVIDER_KEY, provider)

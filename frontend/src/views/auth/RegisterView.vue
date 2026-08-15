@@ -352,6 +352,7 @@ import {
   validatePromoCode,
   validateInvitationCode
 } from '@/api/auth'
+import { resolveSignedInHomePath } from '@/utils/userHomePath'
 import { buildAuthErrorMessage } from '@/utils/authError'
 import { extractApiErrorCode, extractI18nErrorMessage } from '@/utils/apiError'
 import {
@@ -1039,7 +1040,13 @@ async function handleRegister(): Promise<void> {
     appStore.showSuccess(t('auth.accountCreatedSuccess', { siteName: siteName.value }))
 
     // Redirect to dashboard
-    await router.push('/dashboard')
+    await router.push(
+      resolveSignedInHomePath({
+        isAdmin: authStore.isAdmin,
+        isSimpleMode: authStore.isSimpleMode,
+        hiddenMenuKeys: appStore.cachedPublicSettings?.hidden_menu_keys,
+      }),
+    )
   } catch (error: unknown) {
     // Handle registration error
     errorMessage.value = buildRegistrationErrorMessage(error, t('auth.registrationFailed'))

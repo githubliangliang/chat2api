@@ -194,6 +194,7 @@ import {
   sendVerifyCode,
 } from '@/api/auth'
 import { apiClient } from '@/api/client'
+import { resolveSignedInHomePath, sanitizeInternalRedirectPath } from '@/utils/userHomePath'
 import { buildAuthErrorMessage } from '@/utils/authError'
 import { extractApiErrorCode } from '@/utils/apiError'
 import {
@@ -743,7 +744,16 @@ async function handleVerify(): Promise<void> {
     appStore.showSuccess(t('auth.accountCreatedSuccess', { siteName: siteName.value }))
 
     // Redirect to dashboard
-    await router.push(pendingRedirect.value || '/dashboard')
+    await router.push(
+      sanitizeInternalRedirectPath(
+        pendingRedirect.value,
+        resolveSignedInHomePath({
+          isAdmin: authStore.isAdmin,
+          isSimpleMode: authStore.isSimpleMode,
+          hiddenMenuKeys: appStore.cachedPublicSettings?.hidden_menu_keys,
+        }),
+      ),
+    )
   } catch (error: unknown) {
     errorMessage.value = buildRegistrationErrorMessage(error, t('auth.verifyFailed'))
 

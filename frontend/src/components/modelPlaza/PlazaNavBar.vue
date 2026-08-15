@@ -44,6 +44,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { sanitizeUrl } from '@/utils/url'
+import { currentSignedInHomePath } from '@/utils/userHomePathStore'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 
@@ -57,5 +58,5 @@ const siteLogo = computed(() =>
   sanitizeUrl(settings.value?.site_logo || '', { allowRelative: true, allowDataUrl: true })
 )
 const isAuthenticated = computed(() => authStore.isAuthenticated)
-const backTarget = computed(() => (authStore.isAdmin ? '/admin/accounts' : '/dashboard'))
+const backTarget = computed(() => currentSignedInHomePath())
 </script>

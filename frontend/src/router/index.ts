@@ -13,6 +13,8 @@ import { useRoutePrefetch } from '@/composables/useRoutePrefetch'
 import { getSetupStatus } from '@/api/setup'
 import { resolveCompletedSetupRedirectPath } from './setupRedirect'
 import { resolveRouteDocumentTitle } from './title'
+import { collectHiddenMenuKeys } from '@/utils/userHomePath'
+import { currentSignedInHomePath } from '@/utils/userHomePathStore'
 
 /**
  * Route definitions with lazy loading
@@ -540,7 +542,17 @@ router.beforeEach(async (to, _from, next) => {
     try {
       const status = await getSetupStatus()
       if (!status.needs_setup) {
-        next(resolveCompletedSetupRedirectPath(authStore.isAuthenticated, authStore.isAdmin))
+        next(
+          resolveCompletedSetupRedirectPath(
+            authStore.isAuthenticated,
+            authStore.isAdmin,
+            collectHiddenMenuKeys(
+              appStore.cachedPublicSettings?.hidden_menu_keys,
+              adminSettingsStore.hiddenMenuKeys,
+            ),
+            authStore.isSimpleMode,
+          ),
+        )
         return
       }
     } catch {
@@ -559,7 +571,7 @@ router.beforeEach(async (to, _from, next) => {
         return
       }
       // Admin users go to admin dashboard, regular users go to user dashboard
-      next(authStore.isAdmin ? '/admin/accounts' : '/dashboard')
+      next(currentSignedInHomePath())
       return
     }
     // Model Plaza:公开路由但受「启用开关 + 可选强制登录」双重控制(后端同口径 fail-closed)
@@ -574,13 +586,7 @@ router.beforeEach(async (to, _from, next) => {
       const plazaSettings = appStore.cachedPublicSettings
       // 仅在设置成功加载且明确为 false 时拦截(瞬时加载失败视为未知,由后端 404 兜底)
       if (appStore.publicSettingsLoaded && plazaSettings?.model_plaza_enabled === false) {
-        next(
-          authStore.isAuthenticated
-            ? authStore.isAdmin
-              ? '/admin/accounts'
-              : '/dashboard'
-            : '/home'
-        )
+        next(authStore.isAuthenticated ? currentSignedInHomePath() : '/home')
         return
       }
       if (plazaSettings?.model_plaza_require_auth === true && !authStore.isAuthenticated) {
@@ -618,7 +624,7 @@ router.beforeEach(async (to, _from, next) => {
   // Check admin requirement
   if (requiresAdmin && !authStore.isAdmin) {
     // User is authenticated but not admin, redirect to user dashboard
-    next('/dashboard')
+    next(currentSignedInHomePath())
     return
   }
 
@@ -655,7 +661,7 @@ router.beforeEach(async (to, _from, next) => {
     appStore.publicSettingsLoaded &&
     appStore.cachedPublicSettings?.payment_enabled === false
   ) {
-    next(authStore.isAdmin ? '/admin/accounts' : '/dashboard')
+    next(currentSignedInHomePath())
     return
   }
 
@@ -664,7 +670,7 @@ router.beforeEach(async (to, _from, next) => {
     appStore.publicSettingsLoaded &&
     appStore.cachedPublicSettings?.risk_control_enabled === false
   ) {
-    next(authStore.isAdmin ? '/admin/settings' : '/dashboard')
+    next(authStore.isAdmin ? '/admin/settings' : currentSignedInHomePath())
     return
   }
 
@@ -680,7 +686,7 @@ router.beforeEach(async (to, _from, next) => {
 
     if (restrictedPaths.some((path) => to.path.startsWith(path))) {
       // 简易模式下访问受限页面,重定向到仪表板
-      next(authStore.isAdmin ? '/admin/accounts' : '/dashboard')
+      next(currentSignedInHomePath())
       return
     }
   }

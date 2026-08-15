@@ -480,6 +480,7 @@ import { useAuthStore, useAppStore } from '@/stores'
 import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { sanitizeUrl } from '@/utils/url'
+import { resolveSignedInHomePath } from '@/utils/userHomePath'
 
 const { t } = useI18n()
 
@@ -510,7 +511,12 @@ const githubUrl = 'https://github.com/Wei-Shaw/sub2api'
 // Auth state
 const isAuthenticated = computed(() => authStore.isAuthenticated)
 const isAdmin = computed(() => authStore.isAdmin)
-const dashboardPath = computed(() => isAdmin.value ? '/admin/accounts' : '/dashboard')
+const dashboardPath = computed(() =>
+  resolveSignedInHomePath({
+    isAdmin: isAdmin.value,
+    hiddenMenuKeys: appStore.cachedPublicSettings?.hidden_menu_keys,
+  }),
+)
 const userInitial = computed(() => {
   const user = authStore.user
   if (!user || !user.email) return ''

@@ -43,7 +43,9 @@
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import type { OAuthLoginStart } from '@/api/auth'
+import { useAppStore } from '@/stores'
 import { resolveAffiliateReferralCode, storeOAuthAffiliateCode } from '@/utils/oauthAffiliate'
+import { resolveUserHomePath } from '@/utils/userHomePath'
 
 const props = withDefaults(defineProps<{
   disabled?: boolean
@@ -58,9 +60,12 @@ const emit = defineEmits<{
 
 const route = useRoute()
 const { t } = useI18n()
+const appStore = useAppStore()
 
 function startLogin(): void {
-  const redirectTo = (route.query.redirect as string) || '/dashboard'
+  const redirectTo =
+    (route.query.redirect as string) ||
+    resolveUserHomePath({ hiddenMenuKeys: appStore.cachedPublicSettings?.hidden_menu_keys })
   storeOAuthAffiliateCode(resolveAffiliateReferralCode(props.affCode, route.query.aff, route.query.aff_code))
   emit('start', { provider: 'linuxdo', params: { redirect: redirectTo } })
 }
