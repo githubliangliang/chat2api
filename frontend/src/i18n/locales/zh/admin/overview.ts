@@ -1010,6 +1010,14 @@ export default {
         audioSttPerHour: 'STT 每小时价格（USD）',
         pricePlaceholder: '可选'
       },
+      modelPricing: {
+        title: '分组逐模型定价',
+        description: '优先级：分组 → 渠道 → 内置价卡。价格单位 $/1M tokens；按次模式填每次价格。',
+        addEntry: '新增定价条目',
+        empty: '未配置分组定价，按渠道和内置价卡计费。',
+        longContextEnable: '启用长上下文阶梯价',
+        longContextHint: '关闭后 token 模型只按最低档计费，不套官方 ≥200k 加倍价。'
+      },
       webSearchPricing: {
         title: 'Codex 网页搜索计费',
         pricePerCall: '搜索单次价格（USD/次）',

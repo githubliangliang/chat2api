@@ -1013,6 +1013,14 @@ export default {
         audioSttPerHour: 'STT price per hour (USD)',
         pricePlaceholder: 'optional'
       },
+      modelPricing: {
+        title: 'Per-model group pricing',
+        description: 'Resolution order: group → channel → built-in rate card. Token prices are $/1M tokens; per-request mode uses a price per call.',
+        addEntry: 'Add pricing entry',
+        empty: 'No group pricing configured; channel and built-in rates apply.',
+        longContextEnable: 'Enable long-context tiers',
+        longContextHint: 'When off, token models bill at the lowest tier only and skip the official ≥200k multiplier.'
+      },
       webSearchPricing: {
         title: 'Codex Web Search Pricing',
         pricePerCall: 'Price per search call (USD)',

@@ -1546,6 +1546,55 @@
             </div>
           </div>
         </div>
+        <!-- 分组逐模型定价：Group → Channel → 内置 -->
+        <div class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4">
+          <div class="mb-1 flex items-center justify-between">
+            <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300">
+              {{ t("admin.groups.modelPricing.title") }}
+            </h4>
+            <button
+              type="button"
+              class="text-xs text-primary-600 hover:text-primary-700"
+              @click="addGroupPricingEntry(createForm)"
+              data-testid="create-add-model-pricing"
+            >
+              + {{ t("admin.groups.modelPricing.addEntry") }}
+            </button>
+          </div>
+          <p class="mb-3 text-xs text-gray-500 dark:text-gray-400">
+            {{ t("admin.groups.modelPricing.description") }}
+          </p>
+          <div class="mb-3 flex items-center justify-between">
+            <label class="text-sm text-gray-600 dark:text-gray-400">
+              {{ t("admin.groups.modelPricing.longContextEnable") }}
+            </label>
+            <input
+              v-model="createForm.long_context_pricing_enabled"
+              type="checkbox"
+              class="h-4 w-4"
+              data-testid="create-long-context-pricing"
+            />
+          </div>
+          <p class="mb-3 text-xs text-gray-500 dark:text-gray-400">
+            {{ t("admin.groups.modelPricing.longContextHint") }}
+          </p>
+          <p
+            v-if="createForm.model_pricing.length === 0"
+            class="text-xs italic text-gray-400"
+          >
+            {{ t("admin.groups.modelPricing.empty") }}
+          </p>
+          <div v-else class="space-y-2">
+            <PricingEntryCard
+              v-for="(entry, idx) in createForm.model_pricing"
+              :key="idx"
+              :entry="entry"
+              :platform="createForm.platform"
+              @update="updateGroupPricingEntry(createForm, idx, $event)"
+              @remove="removeGroupPricingEntry(createForm, idx)"
+            />
+          </div>
+        </div>
         <!-- OpenAI Live 开关（仅 openai 平台） -->
         <div
           v-if="createForm.platform === 'openai'"
@@ -3249,6 +3298,55 @@
             </div>
           </div>
         </div>
+        <!-- 分组逐模型定价：Group → Channel → 内置 -->
+        <div class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4">
+          <div class="mb-1 flex items-center justify-between">
+            <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300">
+              {{ t("admin.groups.modelPricing.title") }}
+            </h4>
+            <button
+              type="button"
+              class="text-xs text-primary-600 hover:text-primary-700"
+              @click="addGroupPricingEntry(editForm)"
+              data-testid="edit-add-model-pricing"
+            >
+              + {{ t("admin.groups.modelPricing.addEntry") }}
+            </button>
+          </div>
+          <p class="mb-3 text-xs text-gray-500 dark:text-gray-400">
+            {{ t("admin.groups.modelPricing.description") }}
+          </p>
+          <div class="mb-3 flex items-center justify-between">
+            <label class="text-sm text-gray-600 dark:text-gray-400">
+              {{ t("admin.groups.modelPricing.longContextEnable") }}
+            </label>
+            <input
+              v-model="editForm.long_context_pricing_enabled"
+              type="checkbox"
+              class="h-4 w-4"
+              data-testid="edit-long-context-pricing"
+            />
+          </div>
+          <p class="mb-3 text-xs text-gray-500 dark:text-gray-400">
+            {{ t("admin.groups.modelPricing.longContextHint") }}
+          </p>
+          <p
+            v-if="editForm.model_pricing.length === 0"
+            class="text-xs italic text-gray-400"
+          >
+            {{ t("admin.groups.modelPricing.empty") }}
+          </p>
+          <div v-else class="space-y-2">
+            <PricingEntryCard
+              v-for="(entry, idx) in editForm.model_pricing"
+              :key="idx"
+              :entry="entry"
+              :platform="editForm.platform"
+              @update="updateGroupPricingEntry(editForm, idx, $event)"
+              @remove="removeGroupPricingEntry(editForm, idx)"
+            />
+          </div>
+        </div>
         <!-- OpenAI Live 开关（仅 openai 平台） -->
         <div
           v-if="editForm.platform === 'openai'"
@@ -4377,6 +4475,16 @@ import GroupRateMultipliersModal from "@/components/admin/group/GroupRateMultipl
 import GroupRPMOverridesModal from "@/components/admin/group/GroupRPMOverridesModal.vue";
 import GroupCapacityBadge from "@/components/common/GroupCapacityBadge.vue";
 import ReasoningEffortPolicyFields from "@/components/admin/group/ReasoningEffortPolicyFields.vue";
+import PricingEntryCard from "@/components/admin/channel/PricingEntryCard.vue";
+import type { PricingFormEntry } from "@/components/admin/channel/types";
+import {
+  apiIntervalsToForm,
+  formIntervalsToAPI,
+  mTokToPerToken,
+  perTokenToMTok,
+  toNullableNumber,
+} from "@/components/admin/channel/types";
+import type { ChannelModelPricing } from "@/api/admin/channels";
 import { VueDraggable } from "vue-draggable-plus";
 import { createStableObjectKeyResolver } from "@/utils/stableObjectKey";
 import { extractApiErrorMessage } from "@/utils/apiError";
@@ -4936,6 +5044,9 @@ const createForm = reactive({
   audio_realtime_price_per_min: null as number | null,
   audio_tts_price_per_million_chars: null as number | null,
   audio_stt_price_per_hour: null as number | null,
+  // 分组逐模型定价：优先级高于渠道和内置价卡
+  long_context_pricing_enabled: true,
+  model_pricing: [] as PricingFormEntry[],
   // 高峰时段倍率配置
   peak_rate_enabled: false,
   peak_start: "",
@@ -5295,6 +5406,9 @@ const editForm = reactive({
   audio_realtime_price_per_min: null as number | null,
   audio_tts_price_per_million_chars: null as number | null,
   audio_stt_price_per_hour: null as number | null,
+  // 分组逐模型定价：优先级高于渠道和内置价卡
+  long_context_pricing_enabled: true,
+  model_pricing: [] as PricingFormEntry[],
   // 高峰时段倍率配置
   peak_rate_enabled: false,
   peak_start: "",
@@ -5714,6 +5828,72 @@ const openCreateModal = () => {
   loadModelsListCandidates("create", 0, createForm.platform);
 };
 
+// 分组逐模型定价：与渠道定价共用表单结构。表单按 $/1M tokens 展示，提交转 per-token。
+const groupPricingToForm = (
+  pricing?: ChannelModelPricing[] | null,
+): PricingFormEntry[] =>
+  (pricing || []).map((entry) => ({
+    models: [...(entry.models || [])],
+    billing_mode: entry.billing_mode || "token",
+    input_price: perTokenToMTok(entry.input_price),
+    output_price: perTokenToMTok(entry.output_price),
+    cache_write_price: perTokenToMTok(entry.cache_write_price),
+    cache_read_price: perTokenToMTok(entry.cache_read_price),
+    image_input_price: perTokenToMTok(entry.image_input_price),
+    image_output_price: perTokenToMTok(entry.image_output_price),
+    per_request_price: entry.per_request_price,
+    intervals: apiIntervalsToForm(entry.intervals || []),
+  }));
+
+const groupPricingToAPI = (
+  entries: PricingFormEntry[],
+): ChannelModelPricing[] =>
+  entries
+    .filter((entry) => entry.models.length > 0)
+    .map((entry) => ({
+      platform: "",
+      models: entry.models,
+      billing_mode: entry.billing_mode,
+      input_price: mTokToPerToken(entry.input_price),
+      output_price: mTokToPerToken(entry.output_price),
+      cache_write_price: mTokToPerToken(entry.cache_write_price),
+      cache_read_price: mTokToPerToken(entry.cache_read_price),
+      image_input_price: mTokToPerToken(entry.image_input_price),
+      image_output_price: mTokToPerToken(entry.image_output_price),
+      per_request_price: toNullableNumber(entry.per_request_price),
+      intervals: formIntervalsToAPI(entry.intervals || []),
+    }));
+
+const addGroupPricingEntry = (form: { model_pricing: PricingFormEntry[] }) => {
+  form.model_pricing.push({
+    models: [],
+    billing_mode: "token",
+    input_price: null,
+    output_price: null,
+    cache_write_price: null,
+    cache_read_price: null,
+    image_input_price: null,
+    image_output_price: null,
+    per_request_price: null,
+    intervals: [],
+  });
+};
+
+const updateGroupPricingEntry = (
+  form: { model_pricing: PricingFormEntry[] },
+  idx: number,
+  updated: PricingFormEntry,
+) => {
+  form.model_pricing.splice(idx, 1, updated);
+};
+
+const removeGroupPricingEntry = (
+  form: { model_pricing: PricingFormEntry[] },
+  idx: number,
+) => {
+  form.model_pricing.splice(idx, 1);
+};
+
 const closeCreateModal = () => {
   showCreateModal.value = false;
   createModelRoutingRules.value.forEach((rule) => {
@@ -5749,6 +5929,8 @@ const closeCreateModal = () => {
   createForm.audio_realtime_price_per_min = null;
   createForm.audio_tts_price_per_million_chars = null;
   createForm.audio_stt_price_per_hour = null;
+  createForm.long_context_pricing_enabled = true;
+  createForm.model_pricing = [];
   createForm.peak_rate_enabled = false;
   createForm.peak_start = "";
   createForm.peak_end = "";
@@ -5835,6 +6017,7 @@ const handleCreateGroup = async () => {
   try {
     const {
       video_model_prices: _createFormVideoModelPrices,
+      model_pricing: _createFormModelPricing,
       ...createGroupForm
     } = createForm;
     const videoModelPrices = serializeVideoModelPrices(
@@ -5843,6 +6026,7 @@ const handleCreateGroup = async () => {
     // 构建请求数据，包含模型路由配置
     const requestData = {
       ...createGroupForm,
+      model_pricing: groupPricingToAPI(createForm.model_pricing),
       daily_limit_usd: normalizeOptionalLimit(
         createForm.daily_limit_usd as number | string | null,
       ),
@@ -5989,6 +6173,9 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.audio_realtime_price_per_min = group.audio_realtime_price_per_min ?? null;
   editForm.audio_tts_price_per_million_chars = group.audio_tts_price_per_million_chars ?? null;
   editForm.audio_stt_price_per_hour = group.audio_stt_price_per_hour ?? null;
+  editForm.long_context_pricing_enabled =
+    group.long_context_pricing_enabled ?? true;
+  editForm.model_pricing = groupPricingToForm(group.model_pricing);
   editForm.peak_rate_enabled = group.peak_rate_enabled ?? false;
   editForm.peak_start = group.peak_start ?? "";
   editForm.peak_end = group.peak_end ?? "";
@@ -6074,6 +6261,8 @@ const closeEditModal = () => {
   editForm.audio_realtime_price_per_min = null;
   editForm.audio_tts_price_per_million_chars = null;
   editForm.audio_stt_price_per_hour = null;
+  editForm.long_context_pricing_enabled = true;
+  editForm.model_pricing = [];
   resetMessagesDispatchFormState(editForm);
   editForm.allow_live = false;
   resetModelsListState(editModelsListState);
@@ -6101,6 +6290,7 @@ const handleUpdateGroup = async () => {
     // 转换 fallback_group_id: null -> 0 (后端使用 0 表示清除)
     const payload = {
       ...editForm,
+      model_pricing: groupPricingToAPI(editForm.model_pricing),
       daily_limit_usd: normalizeOptionalLimit(
         editForm.daily_limit_usd as number | string | null,
       ),

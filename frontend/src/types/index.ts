@@ -2,6 +2,8 @@
  * Core Type Definitions for Sub2API Frontend
  */
 
+import type { ChannelModelPricing } from '@/api/admin/channels'
+
 // ==================== Common Types ====================
 
 export interface SelectOption {
@@ -560,6 +562,8 @@ export interface Group {
   daily_limit_usd: number | null
   weekly_limit_usd: number | null
   monthly_limit_usd: number | null
+  // 关闭后 token 模型只取最低档，不套官方长上下文阶梯
+  long_context_pricing_enabled: boolean
   // 图片生成计费配置
   allow_image_generation: boolean
   allow_batch_image_generation: boolean
@@ -611,6 +615,9 @@ export interface AdminGroup extends Group {
   profit_control_enabled: boolean
   profit_min_margin: number
   profit_safety_buffer: number
+
+  // 分组逐模型定价（仅管理员可见）；优先级高于渠道和内置定价
+  model_pricing: ChannelModelPricing[] | null
 
   // 模型路由配置（仅管理员可见，内部信息）
   model_routing: Record<string, number[]> | null
@@ -788,6 +795,8 @@ export interface CreateGroupRequest {
   audio_realtime_price_per_min?: number | null
   audio_tts_price_per_million_chars?: number | null
   audio_stt_price_per_hour?: number | null
+  long_context_pricing_enabled?: boolean
+  model_pricing?: ChannelModelPricing[]
   peak_rate_enabled?: boolean
   peak_start?: string
   peak_end?: string
@@ -848,6 +857,8 @@ export interface UpdateGroupRequest {
   audio_realtime_price_per_min?: number | null
   audio_tts_price_per_million_chars?: number | null
   audio_stt_price_per_hour?: number | null
+  long_context_pricing_enabled?: boolean
+  model_pricing?: ChannelModelPricing[]
   peak_rate_enabled?: boolean
   peak_start?: string
   peak_end?: string

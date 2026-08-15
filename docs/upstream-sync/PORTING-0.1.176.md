@@ -1,7 +1,7 @@
 # 移植清单：上游 v0.1.176
 
 对照日期：2026-08-15。  
-合完一项就把状态改成「已合」。P0 已合，P1–P3 未动。
+合完一项就把状态改成「已合」。P0、P1、P2 已合，P3 未动。
 
 通用流程见 [README.md](./README.md)。
 
@@ -114,22 +114,21 @@ go test -tags=unit ./internal/pkg/xai/ ./internal/service/ -count=1 \
 
 本仓库 `applyGrokTokenClaims` 只解 `email` / `sub` / `team_id`，不解 `tier`。
 
-状态：未合
+状态：已合（2026-08-15，仅后端）
 
 | 文件 | 动作 | 改什么 |
 |------|------|--------|
-| `backend/internal/pkg/xai/subscription_tier.go` | **新建** | 上游 279 行：`MapJWTSubscriptionTier`、`SubscriptionTierFromJWT`、`CanonicalGrokPlan`、4.5 window 推断 Heavy |
-| `backend/internal/pkg/xai/subscription_tier_test.go` | **新建** | 上游测试原样 |
-| `backend/internal/pkg/xai/quota.go` | 改 | 快照字段 `PlanFrom45Responses` / `PlanFrom45ResponsesAt` |
-| `backend/internal/service/grok_oauth_service.go` | 改 | `applyGrokTokenClaims` 写入 JWT `tier`；刷新后覆盖失效订阅 |
-| `backend/internal/service/grok_oauth_service_test.go` | 改 | 上游约 +80 |
-| `backend/internal/service/grok_quota_fetcher.go` | 改 | 刷新用 JWT + 4.5 window 覆盖档位 |
-| `backend/internal/service/grok_quota_fetcher_test.go` | 改 | 上游约 +105 |
-| `backend/internal/service/account_test_service.go` | 小改 | 测连通性时带档位 |
-| `frontend/src/components/common/PlatformTypeBadge.vue` | 可选 | SuperGrok / Heavy 颜色 |
-| `frontend/src/components/account/AccountUsageCell.vue` | **慎** | 按实时档位展示，可能和简化过的用量格冲突。P1 可只做后端 |
-| `frontend/src/utils/accountUsageRefresh.ts` | **慎** | 增量刷新比 Grok 快照；后置 |
-| `frontend/src/views/admin/AccountsView.vue` | **先别动** | +100 行徽章/自动刷新，和本 fork 简化冲突 |
+| `backend/internal/pkg/xai/subscription_tier.go` | 新建 | `MapJWTSubscriptionTier`、`SubscriptionTierFromJWT`、`CanonicalGrokPlan`、4.5 window 推断 Heavy |
+| `backend/internal/pkg/xai/subscription_tier_test.go` | 新建 | 上游测试原样 |
+| `backend/internal/pkg/xai/quota.go` | 改 | 快照字段 `Model` / `PlanFrom45Responses` / `PlanFrom45ResponsesAt` |
+| `backend/internal/service/grok_oauth_service.go` | 改 | access token 解 JWT `tier`；刷新后覆盖失效订阅；ID token 不解档位 |
+| `backend/internal/service/grok_oauth_service_test.go` | 改 | SSO 抽出档位 + 刷新覆盖 / 保留 |
+| `backend/internal/service/grok_quota_fetcher.go` | 改 | 实时 JWT 优先；否则 CanonicalGrokPlan（含 4.5 window） |
+| `backend/internal/service/grok_quota_fetcher_test.go` | 改 | JWT / SuperGrokPro / 4.5 Heavy 窗口 |
+| `backend/internal/service/openai_gateway_grok.go` | 改 | 写入快照时 stamp 4.5 窗口信号 |
+| `backend/internal/service/grok_quota_service.go` | 改 | 主动探测 stamp 探测模型 |
+| `backend/internal/service/account_test_service.go` | 小改 | Responses / web_search 探测带模型进快照 |
+| `frontend/...` | 跳过 | 徽章/用量格和本 fork 简化 UI 冲突，P1 只做后端 |
 
 自测：JWT `tier=0/1/5/6` → free / supergrok / heavy / lite；刷新后旧档位被覆盖。
 
@@ -139,47 +138,40 @@ go test -tags=unit ./internal/pkg/xai/ ./internal/service/ -count=1 \
 
 解析链改成 **Group → Channel → 内置**。本仓库还是 Channel → 内置。
 
-状态：未合
+状态：已合（2026-08-15）
 
 | 文件 | 动作 | 改什么 |
 |------|------|--------|
-| `backend/migrations/223_group_model_pricing.sql` | **新建** | 不要用上游文件名 `221_*`。SQLite 方言 |
-| `backend/ent/schema/group.go` | 改 | 在 audio 价字段后加：`long_context_pricing_enabled` 默认 **true**；`model_pricing` JSON optional |
-| `backend/ent/*` | 生成 | `go generate ./ent`，不要抄上游 ent |
-| `backend/internal/service/group.go` | 改 | struct 加两个字段 |
-| `backend/internal/repository/group_repo.go` | **手改 SQL** | SELECT/INSERT/UPDATE 加列 |
-| `backend/internal/handler/admin/group_handler.go` | 改 | 创建/更新/响应带上 |
-| `backend/internal/handler/dto/types.go` + `mappers.go` | 改 | API 字段 |
-| `backend/internal/service/admin_group.go` | 改 | 读写 + 校验 |
-| `backend/internal/service/model_pricing_resolver.go` | 改 | 先 group，再 channel。关长上下文时 token 模型只取最低档 |
-| `backend/internal/service/model_pricing_resolver_test.go` | 改 | 上游约 +63 |
-| `backend/internal/service/billing_service.go` | 再改 | 分组开关；**非 OpenAI 不要被 OpenAI 账号开关否决**（#5573） |
-| `backend/internal/repository/api_key_repo.go` | 改 | available groups 查出新字段 |
-| `backend/internal/server/api_contract_test.go` | 改 | 契约字段 |
-| `frontend/src/types/index.ts` | 改 | Group 类型 |
-| `frontend/src/views/admin/GroupsView.vue` | 改 | 逐模型定价表 + 长上下文开关（上游 +122） |
-| `frontend/src/i18n/locales/{zh,en}/admin/channels.ts` | 改 | 文案 |
-| `frontend/src/components/admin/channel/PricingEntryCard.vue` | 看 | 可能只是复用卡片 |
+| `backend/migrations/223_group_model_pricing.sql` | 新建 | SQLite 方言；`long_context_pricing_enabled INTEGER NOT NULL DEFAULT 1`、`model_pricing TEXT` |
+| `backend/ent/schema/group.go` | 改 | audio 价字段后加两列；`model_pricing` 用 `json.RawMessage` |
+| `backend/ent/*` | 生成 | `GOPROXY=https://goproxy.cn,direct go generate ./ent` |
+| `backend/internal/service/group.go` | 改 | struct 加 `LongContextPricingEnabled` / `ModelPricing` |
+| `backend/internal/service/channel.go` | 改 | `ChannelModelPricing` / `PricingInterval` 补 JSON tag（分组定价按 JSON 落库） |
+| `backend/internal/repository/group_repo.go` | 改 | 创建/更新 marshal `model_pricing` |
+| `backend/internal/repository/api_key_repo.go` | 改 | `groupEntityToService` unmarshal，失败降级为 nil + warn |
+| `backend/internal/handler/admin/group_handler.go` | 改 | 创建用值类型、更新用指针；透传两字段 |
+| `backend/internal/handler/dto/types.go` + `mappers.go` | 改 | `Group.long_context_pricing_enabled`；`model_pricing` 仅 AdminGroup |
+| `backend/internal/service/admin_service.go` / `admin_group.go` | 改 | 输入字段 + `normalizeGroupModelPricing`（复用 `validatePricingEntries`） |
+| `backend/internal/service/model_pricing_resolver.go` | 改 | Group → Channel → 内置；关长上下文时 token 模型只取最低档 |
+| `backend/internal/service/billing_service.go` | 改 | `CostInput.Group`；`applyLongCtx` 加 `resolved.longContextPricingEnabled` |
+| `backend/internal/service/gateway_usage_billing.go` / `openai_gateway_usage.go` | 改 | resolve 带 Group，接受 `PricingSourceGroup` |
+| `backend/internal/service/model_pricing_resolver_test.go` | 改 | 分组优先级、长上下文开关、渠道阶梯塌陷、nil group |
+| `backend/internal/server/api_contract_test.go` | 改 | 契约补 `long_context_pricing_enabled` |
+| `frontend/src/types/index.ts` | 改 | Group / AdminGroup / 创建更新请求 |
+| `frontend/src/views/admin/GroupsView.vue` | 改 | 复用 `PricingEntryCard` 的逐模型定价表 + 长上下文开关 |
+| `frontend/src/i18n/locales/{zh,en}/admin/overview.ts` | 改 | `admin.groups.modelPricing.*` 文案 |
 
-SQLite 迁移草稿（新建 `223`，不要改已有文件）：
+自测：
 
-```sql
-ALTER TABLE groups ADD COLUMN long_context_pricing_enabled INTEGER NOT NULL DEFAULT 1;
-ALTER TABLE groups ADD COLUMN model_pricing TEXT;
-UPDATE groups SET long_context_pricing_enabled = 1
- WHERE long_context_pricing_enabled IS NULL OR long_context_pricing_enabled = 0;
+```bash
+cd backend
+go test -tags=unit ./internal/service/ -count=1 -run 'TestResolve_|TestApplyTokenOverrides|TestGetIntervalPricing'
+go test -tags=unit ./internal/server/ -count=1 -run 'TestAPIContracts/GET_/api/v1/groups/available'
+cd ../frontend && pnpm run typecheck && pnpm run lint:check
 ```
 
-默认必须是开。上游修过一次默认 `false` 导致存量分组丢 ≥200k 阶梯。
-
-禁止照抄上游 PG：
-
-```sql
--- 不要用
-ADD COLUMN IF NOT EXISTS ... JSONB
-COMMENT ON COLUMN ...
-IS DISTINCT FROM
-```
+已知预存在失败（HEAD 上同样红，与本次无关）：`migrations` 包全部（断言 PG 语法）、
+`TestAPIContracts/GET_/api/v1/admin/settings*`、OpenAI OAuth originator 系列。
 
 ---
 
