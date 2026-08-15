@@ -599,16 +599,12 @@ const flagAvailableChannels = makeSidebarFlag(FeatureFlags.availableChannels)
 const flagRiskControl = makeSidebarFlag(FeatureFlags.riskControl)
 const flagBatchImageAccess = () => canUseBatchImage.value
 
-// buildSelfNavItems 构造用户自己的导航项（用户端主菜单和管理员的"我的账户"子菜单共享这组声明）。
-// withDashboard=true 时包含仪表盘（用户端），false 时不含（管理员的个人区已经有独立仪表盘入口）。
-//
-// 条目顺序：密钥 → 用量 → 可用渠道 → 渠道状态 → 订阅/支付 → 兑换/资料。
-// 可用渠道紧挨渠道状态之上，让用户"先看自己能用什么、再看对应状态"。
-function buildSelfNavItems(withDashboard: boolean): NavItem[] {
-  const items: NavItem[] = []
-  if (withDashboard) {
-    items.push({ path: '/dashboard', label: t('nav.dashboard'), icon: DashboardIcon })
-  }
+// User-facing nav (regular sidebar + admin "My Account"). /dashboard visibility
+// is controlled by hidden_menu_keys, not by caller.
+function buildSelfNavItems(): NavItem[] {
+  const items: NavItem[] = [
+    { path: '/dashboard', label: t('nav.dashboard'), icon: DashboardIcon },
+  ]
   items.push(
     { path: '/keys', label: t('nav.apiKeys'), icon: KeyIcon },
     { path: '/batch-image', label: t('nav.batchImage'), icon: BatchImageIcon, hideInSimpleMode: true, featureFlag: flagBatchImageAccess },
@@ -664,12 +660,11 @@ function finalizeNav(items: NavItem[]): NavItem[] {
 }
 
 // User navigation items (for regular users)
-const userNavItems = computed((): NavItem[] => finalizeNav(buildSelfNavItems(true)))
+const userNavItems = computed((): NavItem[] => finalizeNav(buildSelfNavItems()))
 
-// Personal navigation items (for admin's "My Account" section, without Dashboard).
-// Admins access 可用渠道 from this section just like regular users — there is no
-// separate admin entry, since the page is purely a user-facing view.
-const personalNavItems = computed((): NavItem[] => finalizeNav(buildSelfNavItems(false)))
+// Personal navigation items (admin "My Account"). Same catalog as regular users,
+// including /dashboard — /admin/dashboard was removed, so this is the only entry.
+const personalNavItems = computed((): NavItem[] => finalizeNav(buildSelfNavItems()))
 
 // Custom menu items filtered by visibility
 const customMenuItemsForUser = computed(() => {
@@ -721,9 +716,10 @@ const adminNavItems = computed((): NavItem[] => {
 
   const visible = applyFeatureFlags(baseItems)
 
-  // 简单模式下，在系统设置前插入 API密钥
+  // Simple mode hides the personal section, so surface toggleable user menus here.
   if (authStore.isSimpleMode) {
     const filtered = visible.filter(item => !item.hideInSimpleMode)
+    filtered.push({ path: '/dashboard', label: t('nav.dashboard'), icon: DashboardIcon })
     filtered.push({ path: '/keys', label: t('nav.apiKeys'), icon: KeyIcon })
     filtered.push({ path: '/admin/menu', label: t('nav.menuManagement'), icon: MenuIcon })
     filtered.push({ path: '/admin/settings', label: t('nav.settings'), icon: CogIcon })

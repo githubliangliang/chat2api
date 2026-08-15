@@ -42,6 +42,23 @@ describe('AppSidebar scroll position persistence', () => {
   })
 })
 
+describe('AppSidebar dashboard menu visibility', () => {
+  it('includes /dashboard in the shared user/admin personal catalog', () => {
+    expect(componentSource).toContain('finalizeNav(buildSelfNavItems())')
+    expect(componentSource).toContain("{ path: '/dashboard', label: t('nav.dashboard'), icon: DashboardIcon }")
+    expect(componentSource).not.toContain('buildSelfNavItems(false)')
+  })
+
+  it('injects /dashboard into simple-mode admin nav so menu management can show it', () => {
+    const simpleBlock = componentSource.slice(
+      componentSource.indexOf('if (authStore.isSimpleMode)'),
+      componentSource.indexOf("filtered.push({ path: '/admin/menu'"),
+    )
+    expect(simpleBlock).toContain("path: '/dashboard'")
+    expect(simpleBlock).toContain("path: '/keys'")
+  })
+})
+
 describe('AppSidebar header styles', () => {
   it('does not clip the version badge dropdown', () => {
     const sidebarHeaderBlockMatch = styleSource.match(/\.sidebar-header\s*\{[\s\S]*?\n {2}\}/)
