@@ -26,7 +26,7 @@ import (
 //
 // 该函数执行以下操作：
 //  1. 初始化全局时区设置，确保时间处理一致性
-//  2. 建立数据库连接（PostgreSQL 或 SQLite）
+//  2. 建立 SQLite 数据库连接
 //  3. 自动执行数据库迁移，确保 schema 与代码同步
 //  4. 创建并返回 Ent 客户端实例
 //
@@ -53,8 +53,7 @@ func InitEnt(cfg *config.Config) (*ent.Client, *sql.DB, error) {
 	applyDBPoolSettings(drv.DB(), cfg)
 
 	// 确保数据库 schema 已准备就绪。
-	// PostgreSQL / SQLite：均以 backend/migrations/*.sql 为 schema 权威来源
-	//（当前迁移文件为 SQLite 方言；见 scripts/pg_sql_to_sqlite.py）。
+	// 以 backend/migrations/*.sql 为 schema 权威来源（SQLite 方言）。
 	migrationCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	if err := prepareSchema(migrationCtx, drv, cfg); err != nil {
@@ -129,7 +128,7 @@ func openSQLiteDriver(cfg *config.Config) (*entsql.Driver, error) {
 }
 
 // prepareSchema applies SQL migrations (SQLite dialect under migrations/*.sql).
-// Both PostgreSQL and SQLite use the embedded migration files as the schema source.
+// SQLite uses the embedded migration files as the schema source.
 func prepareSchema(ctx context.Context, drv *entsql.Driver, cfg *config.Config) error {
 	return prepareSchemaWithFS(ctx, drv, cfg, migrations.FS)
 }

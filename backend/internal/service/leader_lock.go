@@ -20,7 +20,7 @@ type LeaderLockCache interface {
 
 // tryAcquireSingletonLeaderLock provides best-effort single-flight execution of a
 // periodic background job across multiple instances. It prefers the Redis-backed
-// LeaderLockCache and falls back to a Postgres advisory lock when the cache is
+// LeaderLockCache and falls back to an in-process advisory lock when the cache is
 // unavailable or errors, mirroring the approach used by the Ops background
 // services.
 //

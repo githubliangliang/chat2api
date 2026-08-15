@@ -63,9 +63,9 @@ vi.mock('vue-i18n', () => ({
 const baseRecord = (id: string, parts?: unknown[]) => ({
   id,
   status: 'completed',
-  backup_type: 'postgres',
-  file_name: `${id}.sql.gz`,
-  s3_key: `backups/${id}.sql.gz`,
+  backup_type: 'sqlite',
+  file_name: `${id}.db.gz`,
+  s3_key: `backups/${id}.db.gz`,
   parts,
   size_bytes: 10,
   triggered_by: 'manual',
@@ -126,7 +126,7 @@ describe('admin BackupView 分卷备份', () => {
 
   it('旧单文件记录仍使用单个下载地址', async () => {
     listBackups.mockResolvedValue({ items: [baseRecord('legacy')] })
-    getDownloadURL.mockResolvedValue({ url: 'https://example.test/legacy.sql.gz' })
+    getDownloadURL.mockResolvedValue({ url: 'https://example.test/legacy.db.gz' })
 
     const wrapper = mountBackupView()
     await flushPromises()

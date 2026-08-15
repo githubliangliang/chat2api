@@ -9,21 +9,15 @@
 | **上游仓库** | Wei-Shaw/sub2api |
 | **Fork 仓库** | bayma888/sub2api-bmai |
 | **技术栈** | Go 后端 (Ent ORM + Gin) + Vue3 前端 (pnpm) |
-| **数据库** | PostgreSQL 16（推荐）或 SQLite；Redis 可选（单机可嵌入） |
-| **重构说明** | 见 [REFACTOR.md](./REFACTOR.md)：SQLite/PG 双驱动、Redis 可选、菜单可隐藏 |
+| **数据库** | SQLite（本 fork 唯一目标）；Redis 可选（单机可嵌入） |
+| **重构说明** | 见 [REFACTOR.md](./REFACTOR.md)：SQLite-only、Redis 可选、菜单可隐藏 |
 | **包管理** | 后端: go modules, 前端: **pnpm**（不是 npm） |
 
 ## 二、本地环境配置
 
-### PostgreSQL 16 (Windows 服务)
+### SQLite
 
-| 配置项 | 值 |
-|--------|-----|
-| 端口 | 5432 |
-| psql 路径 | `C:\Program Files\PostgreSQL\16\bin\psql.exe` |
-| pg_hba.conf | `C:\Program Files\PostgreSQL\16\data\pg_hba.conf` |
-| 数据库凭据 | user=`sub2api`, password=`sub2api`, dbname=`sub2api` |
-| 超级用户 | user=`postgres`, password=`postgres` |
+个人开发默认使用 `./data/sub2api.db`。不需要安装 PostgreSQL。
 
 ### Redis
 
@@ -108,51 +102,35 @@ pnpm install
 
 **问题**：bcrypt hash 格式如 `$2a$10$xxx...`，PowerShell 把 `$2a` 当变量解析，导致数据丢失。
 
-**解决**：将 SQL 写入文件，用 `psql -f` 执行：
+**解决**：把 SQL 写进文件再执行，不要把 hash 直接贴进 shell：
 ```bash
 # 错误示范（PowerShell 会吃掉 $）
-psql -c "INSERT INTO users ... VALUES ('$2a$10$...')"
+sqlite3 ./data/sub2api.db "INSERT INTO users ... VALUES ('$2a$10$...')"
 
 # 正确做法
-echo "INSERT INTO users ... VALUES ('\$2a\$10\$...')" > temp.sql
-psql -U sub2api -h 127.0.0.1 -d sub2api -f temp.sql
+printf "%s\n" "INSERT INTO users ... VALUES ('\$2a\$10\$...');" > temp.sql
+sqlite3 ./data/sub2api.db < temp.sql
 ```
 
 ---
 
-### 坑 4：psql 不支持中文路径
+### 坑 4：sqlite3 对中文路径不友好
 
-**问题**：`psql -f "D:\中文路径\file.sql"` 报错找不到文件。
+**问题**：`sqlite3 "D:\中文路径\sub2api.db"` 或 `-init` 中文路径时，部分终端会找不到文件。
 
 **解决**：复制到纯英文路径再执行：
 ```bash
 cp "D:\中文路径\file.sql" "C:\temp.sql"
-psql -f "C:\temp.sql"
+sqlite3 ./data/sub2api.db < C:/temp.sql
 ```
 
 ---
 
-### 坑 5：PostgreSQL 密码重置流程
+### 坑 5：SQLite 文件路径与权限
 
-**场景**：忘记 PostgreSQL 密码。
+**场景**：启动报找不到数据库文件，或 WAL 文件无法写入。
 
-**步骤**：
-1. 修改 `C:\Program Files\PostgreSQL\16\data\pg_hba.conf`
-   ```
-   # 将 scram-sha-256 改为 trust
-   host    all    all    127.0.0.1/32    trust
-   ```
-2. 重启 PostgreSQL 服务
-   ```powershell
-   Restart-Service postgresql-x64-16
-   ```
-3. 无密码登录并重置
-   ```bash
-   psql -U postgres -h 127.0.0.1
-   ALTER USER sub2api WITH PASSWORD 'sub2api';
-   ALTER USER postgres WITH PASSWORD 'postgres';
-   ```
-4. 改回 `scram-sha-256` 并重启
+**解决**：确认 `database.path`（默认 `./data/sub2api.db`）所在目录可写；不要把 `.db` 放到只读卷。删除 `*.db` / `*.db-wal` / `*.db-shm` 会清空本地数据，仅个人环境可接受。
 
 ---
 
@@ -171,14 +149,6 @@ grep -r "type.*Mock.*struct" internal/
 
 # 逐一补全新方法
 ```
-
----
-
-### 坑 7：Windows 上 psql 连 localhost 的 IPv6 问题
-
-**问题**：psql 连 `localhost` 先尝试 IPv6 (::1)，可能报错后再回退 IPv4。
-
-**建议**：直接用 `127.0.0.1` 代替 `localhost`。
 
 ---
 
@@ -249,17 +219,14 @@ git add ent/       # 生成的文件也要提交
 ### 数据库操作
 
 ```bash
-# 连接数据库
-psql -U sub2api -h 127.0.0.1 -d sub2api
+# 打开本地 SQLite
+sqlite3 ./data/sub2api.db
 
-# 查看所有用户
-psql -U postgres -h 127.0.0.1 -c "\du"
-
-# 查看所有数据库
-psql -U postgres -h 127.0.0.1 -c "\l"
+# 查看表
+sqlite3 ./data/sub2api.db ".tables"
 
 # 执行 SQL 文件
-psql -U sub2api -h 127.0.0.1 -d sub2api -f migration.sql
+sqlite3 ./data/sub2api.db < migration.sql
 ```
 
 ### Git 操作

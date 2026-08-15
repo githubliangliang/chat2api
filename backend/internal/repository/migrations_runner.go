@@ -17,7 +17,7 @@ import (
 // schema_migrations 记录已应用的迁移文件及其校验和。
 // - filename: 迁移文件名（主键）
 // - checksum: 文件内容 SHA256，用于检测迁移被篡改
-// - applied_at: 应用时间（PG: TIMESTAMPTZ / SQLite: TEXT）
+// - applied_at: 应用时间（SQLite TEXT / datetime('now')）
 const schemaMigrationsTableDDLSQLite = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
 	filename   TEXT PRIMARY KEY,
@@ -142,7 +142,7 @@ var migrationChecksumCompatibilityRules = map[string]migrationChecksumCompatibil
 // 该函数可以在每次应用启动时安全调用：
 // - 已应用的迁移会被自动跳过（通过校验 filename 判断）
 // - 如果迁移文件内容被修改（checksum 不匹配），会返回错误
-// - 使用 PostgreSQL Advisory Lock 确保多实例并发安全
+// - 使用进程内 advisory lock 避免同进程并发迁移
 //
 // 参数：
 //   - ctx: 上下文，用于超时控制和取消
@@ -161,7 +161,7 @@ func ApplyMigrations(ctx context.Context, db *sql.DB) error {
 // 它从指定的文件系统读取 SQL 迁移文件并按顺序应用。
 //
 // 迁移执行流程：
-//  1. 获取 PostgreSQL Advisory Lock，防止多实例并发迁移
+//  1. 获取进程内 advisory lock，防止同进程并发迁移
 //  2. 确保 schema_migrations 表存在
 //  3. 按文件名排序读取所有 .sql 文件
 //  4. 对于每个迁移文件：
@@ -299,8 +299,7 @@ func applyMigrationsFS(ctx context.Context, db *sql.DB, fsys fs.FS) error {
 		}
 
 		// 执行迁移 SQL。
-		// SQLite 的 database/sql 驱动通常一次只接受一条语句，需拆分执行；
-		// PostgreSQL 可整文件一次 Exec。
+		// SQLite 的 database/sql 驱动通常一次只接受一条语句，需拆分执行。
 		if sqlite {
 			for i, stmt := range splitSQLStatements(content) {
 				trimmed := strings.TrimSpace(stmt)

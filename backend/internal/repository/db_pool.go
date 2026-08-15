@@ -1,10 +1,8 @@
 // Package repository contains persistence infrastructure helpers.
 //
-// DB pool lifetimes are clamped here because lib/pq starts watchCancel
-// goroutines for context-aware queries. If a cloud proxy silently drops idle
-// TCP without RST/FIN, those goroutines can block in Read until database/sql
-// retires the connection. This is a short-term mitigation; the long-term
-// follow-up is migrating PostgreSQL access to jackc/pgx/v5/stdlib.
+// SQLite uses a single-writer model, so the pool is clamped to a small size
+// to avoid lock contention. Idle/lifetime caps still apply so leaked
+// connections cannot accumulate.
 package repository
 
 import (

@@ -195,20 +195,9 @@ export default {
     description: '配置您的 Sub2API 实例',
     database: {
       title: '数据库配置',
-      description: '连接到您的 PostgreSQL 数据库',
-      host: '主机',
-      port: '端口',
-      username: '用户名',
-      password: '密码',
-      databaseName: '数据库名称',
-      sslMode: 'SSL 模式',
-      passwordPlaceholder: '密码',
-      ssl: {
-        disable: '禁用',
-        require: '要求',
-        verifyCa: '验证 CA',
-        verifyFull: '完全验证'
-      }
+      description: '选择本地 SQLite 数据库文件',
+      path: '数据库文件路径',
+      pathPlaceholder: './data/sub2api.db'
     },
     redis: {
       title: 'Redis 配置',

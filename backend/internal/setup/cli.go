@@ -19,16 +19,6 @@ func cliValidateHostname(host string) bool {
 	return validHost.MatchString(host) && len(host) <= 253
 }
 
-func cliValidateDBName(name string) bool {
-	validName := regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_]*$`)
-	return validName.MatchString(name) && len(name) <= 63
-}
-
-func cliValidateUsername(name string) bool {
-	validName := regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
-	return validName.MatchString(name) && len(name) <= 63
-}
-
 func cliValidateEmail(email string) bool {
 	_, err := mail.ParseAddress(email)
 	return err == nil && len(email) <= 254
@@ -36,13 +26,6 @@ func cliValidateEmail(email string) bool {
 
 func cliValidatePort(port int) bool {
 	return port > 0 && port <= 65535
-}
-
-func cliValidateSSLMode(mode string) bool {
-	validModes := map[string]bool{
-		"disable": true, "require": true, "verify-ca": true, "verify-full": true,
-	}
-	return validModes[mode]
 }
 
 // RunCLI runs the CLI setup wizard

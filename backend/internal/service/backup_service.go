@@ -105,7 +105,7 @@ type BackupScheduleConfig struct {
 type BackupRecord struct {
 	ID            string       `json:"id"`
 	Status        string       `json:"status"`      // pending, running, completed, failed
-	BackupType    string       `json:"backup_type"` // postgres
+	BackupType    string       `json:"backup_type"` // sqlite
 	FileName      string       `json:"file_name"`
 	S3Key         string       `json:"s3_key"`
 	Parts         []BackupPart `json:"parts,omitempty"`
@@ -532,7 +532,7 @@ func (s *BackupService) CreateBackup(ctx context.Context, triggeredBy string, ex
 
 	now := time.Now()
 	backupID := uuid.New().String()[:8]
-	fileName := fmt.Sprintf("%s_%s.sql.gz", s.dbCfg.DBName, now.Format("20060102_150405"))
+	fileName := s.backupFileName(now)
 	s3Key := s.buildS3Key(s3Cfg, fileName)
 
 	var expiresAt string
@@ -543,7 +543,7 @@ func (s *BackupService) CreateBackup(ctx context.Context, triggeredBy string, ex
 	record := &BackupRecord{
 		ID:          backupID,
 		Status:      "running",
-		BackupType:  "postgres",
+		BackupType:  "sqlite",
 		FileName:    fileName,
 		S3Key:       s3Key,
 		TriggeredBy: triggeredBy,
@@ -621,7 +621,7 @@ func (s *BackupService) StartBackup(ctx context.Context, triggeredBy string, exp
 
 	now := time.Now()
 	backupID := uuid.New().String()[:8]
-	fileName := fmt.Sprintf("%s_%s.sql.gz", s.dbCfg.DBName, now.Format("20060102_150405"))
+	fileName := s.backupFileName(now)
 	s3Key := s.buildS3Key(s3Cfg, fileName)
 
 	var expiresAt string
@@ -632,7 +632,7 @@ func (s *BackupService) StartBackup(ctx context.Context, triggeredBy string, exp
 	record := &BackupRecord{
 		ID:          backupID,
 		Status:      "running",
-		BackupType:  "postgres",
+		BackupType:  "sqlite",
 		FileName:    fileName,
 		S3Key:       s3Key,
 		TriggeredBy: triggeredBy,
@@ -678,7 +678,7 @@ func (s *BackupService) executeBackup(record *BackupRecord, objectStore BackupOb
 	ctx, cancel := context.WithTimeout(s.bgCtx, 30*time.Minute)
 	defer cancel()
 
-	// 阶段1: pg_dump -> gzip 临时文件
+	// 阶段1: SQLite snapshot -> gzip 临时文件
 	record.Progress = "dumping"
 	_ = s.saveRecord(ctx, record)
 	archivePath, sizeBytes, err := s.createCompressedBackupFile(ctx)
@@ -717,9 +717,9 @@ func (s *BackupService) executeBackup(record *BackupRecord, objectStore BackupOb
 func (s *BackupService) createCompressedBackupFile(ctx context.Context) (string, int64, error) {
 	dumpReader, err := s.dumper.Dump(ctx)
 	if err != nil {
-		return "", 0, fmt.Errorf("pg_dump: %w", err)
+		return "", 0, fmt.Errorf("sqlite dump: %w", err)
 	}
-	archive, err := os.CreateTemp("", "sub2api-backup-*.sql.gz")
+	archive, err := os.CreateTemp("", "sub2api-backup-*.db.gz")
 	if err != nil {
 		_ = dumpReader.Close()
 		return "", 0, fmt.Errorf("create backup archive: %w", err)
@@ -864,7 +864,7 @@ func (s *BackupService) RestoreBackup(ctx context.Context, backupID string) erro
 	}
 	defer func() { _ = body.Close() }()
 
-	// 流式解压 gzip -> psql（不将全部数据加载到内存）
+	// 流式解压 gzip -> SQLite 文件替换（不将全部数据加载到内存）
 	gzReader, err := gzip.NewReader(body)
 	if err != nil {
 		return fmt.Errorf("gzip reader: %w", err)
@@ -873,7 +873,7 @@ func (s *BackupService) RestoreBackup(ctx context.Context, backupID string) erro
 
 	// 流式恢复
 	if err := s.dumper.Restore(ctx, gzReader); err != nil {
-		return fmt.Errorf("pg restore: %w", err)
+		return fmt.Errorf("sqlite restore: %w", err)
 	}
 
 	return nil
@@ -964,7 +964,7 @@ func (s *BackupService) executeRestore(record *BackupRecord, objectStore BackupO
 		defer func() { _ = cleanupBackupFiles(archivePath) }()
 		if err := s.restoreArchive(ctx, archivePath); err != nil {
 			record.RestoreStatus = "failed"
-			record.RestoreError = fmt.Sprintf("pg restore: %v", err)
+			record.RestoreError = fmt.Sprintf("sqlite restore: %v", err)
 			_ = s.saveRecord(context.Background(), record)
 			return
 		}
@@ -996,7 +996,7 @@ func (s *BackupService) executeRestore(record *BackupRecord, objectStore BackupO
 
 	if err := s.dumper.Restore(ctx, gzReader); err != nil {
 		record.RestoreStatus = "failed"
-		record.RestoreError = fmt.Sprintf("pg restore: %v", err)
+		record.RestoreError = fmt.Sprintf("sqlite restore: %v", err)
 		_ = s.saveRecord(context.Background(), record)
 		return
 	}
@@ -1020,7 +1020,7 @@ func (s *BackupService) downloadBackupParts(ctx context.Context, objectStore Bac
 		}
 	}
 
-	archive, err := os.CreateTemp("", "sub2api-restore-*.sql.gz")
+	archive, err := os.CreateTemp("", "sub2api-restore-*.db.gz")
 	if err != nil {
 		return "", fmt.Errorf("create restore archive: %w", err)
 	}
@@ -1076,7 +1076,7 @@ func (s *BackupService) restoreArchive(ctx context.Context, archivePath string) 
 	}
 	defer func() { _ = gzReader.Close() }()
 	if err := s.dumper.Restore(ctx, gzReader); err != nil {
-		return fmt.Errorf("pg restore: %w", err)
+		return fmt.Errorf("sqlite restore: %w", err)
 	}
 	return nil
 }
@@ -1235,6 +1235,14 @@ func (s *BackupService) getOrCreateStore(ctx context.Context, cfg *BackupS3Confi
 	s.store = store
 	s.s3Cfg = cfg
 	return store, nil
+}
+
+func (s *BackupService) backupFileName(now time.Time) string {
+	name := strings.TrimSpace(s.dbCfg.DBName)
+	if name == "" {
+		name = "sub2api"
+	}
+	return fmt.Sprintf("%s_%s.db.gz", name, now.Format("20060102_150405"))
 }
 
 func (s *BackupService) buildS3Key(cfg *BackupS3Config, fileName string) string {

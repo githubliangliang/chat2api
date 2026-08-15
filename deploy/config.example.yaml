@@ -927,42 +927,22 @@ concurrency:
   ping_interval: 10
 
 # =============================================================================
-# Database Configuration (PostgreSQL | SQLite)
-# 数据库配置 (PostgreSQL | SQLite)
+# Database Configuration (SQLite only)
+# 数据库配置（仅 SQLite）
 # =============================================================================
 database:
-  # Driver: postgres (default, production) | sqlite (single-file, zero external DB)
-  # 驱动：postgres（默认，生产推荐）| sqlite（单文件，无需外部数据库）
-  driver: "postgres"
-  # SQLite file path (only used when driver=sqlite)
-  # SQLite 文件路径（仅 driver=sqlite 时生效）
+  # Driver is accepted for compatibility and always treated as sqlite.
+  # driver 仅为兼容保留，运行时一律按 sqlite 处理。
+  driver: "sqlite"
+  # SQLite file path
+  # SQLite 文件路径
   path: "./data/sub2api.db"
-  # Database host address (postgres)
-  # 数据库主机地址（postgres）
-  host: "localhost"
-  # Database port
-  # 数据库端口
-  port: 5432
-  # Database username
-  # 数据库用户名
-  user: "postgres"
-  # Database password
-  # 数据库密码
-  password: "your_secure_password_here"
-  # Database name
-  # 数据库名称
-  dbname: "sub2api"
-  # SSL mode: disable, prefer, require, verify-ca, verify-full
-  # SSL 模式：disable（禁用）, prefer（优先加密，默认）, require（要求）, verify-ca（验证CA）, verify-full（完全验证）
-  # 默认值为 "prefer"，数据库支持 SSL 时自动使用加密连接，不支持时回退明文
-  sslmode: "prefer"
-  # Max open connections (高并发场景建议 256+，需配合 PostgreSQL max_connections 调整)
-  # SQLite 建议保持较小值（例如 4）
-  # 最大打开连接数
-  max_open_conns: 256
-  # Max idle connections (建议为 max_open_conns 的 50%，减少频繁建连开销)
+  # Max open connections. SQLite should stay small (for example 4).
+  # 最大打开连接数。SQLite 建议保持较小值（例如 4）
+  max_open_conns: 4
+  # Max idle connections
   # 最大空闲连接数
-  max_idle_conns: 128
+  max_idle_conns: 4
   # Connection max lifetime (minutes)
   # 连接最大存活时间（分钟）
   conn_max_lifetime_minutes: 30

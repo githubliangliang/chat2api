@@ -6,7 +6,7 @@
 
 [![Go](https://img.shields.io/badge/Go-1.26.5-00ADD8.svg)](https://golang.org/)
 [![Vue](https://img.shields.io/badge/Vue-3.4+-4FC08D.svg)](https://vuejs.org/)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-336791.svg)](https://www.postgresql.org/)
+[![SQLite](https://img.shields.io/badge/SQLite-only-003B57.svg)](https://www.sqlite.org/)
 [![Redis](https://img.shields.io/badge/Redis-7+-DC382D.svg)](https://redis.io/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](https://www.docker.com/)
 
@@ -200,7 +200,7 @@ Sub2API 是一个 AI API 网关平台，用于分发和管理 AI 产品订阅的
 |------|------|
 | 后端 | Go 1.26.5, Gin, Ent |
 | 前端 | Vue 3.4+, Vite 5+, TailwindCSS |
-| 数据库 | PostgreSQL 15+ |
+| 数据库 | SQLite（本 fork 唯一目标） |
 | 缓存/队列 | Redis 7+ |
 
 ---
@@ -226,8 +226,8 @@ Nginx 默认会丢弃名称中含下划线的请求头（如 `session_id`），�
 #### 前置条件
 
 - Linux 服务器（amd64 或 arm64）
-- PostgreSQL 15+（已安装并运行）
-- Redis 7+（已安装并运行）
+- 无需独立数据库（SQLite 文件）
+- Redis 7+（可选；可关外置）
 - Root 权限
 
 #### 安装步骤
@@ -489,8 +489,8 @@ cd sub2api/deploy
 
 - Go 1.21+
 - Node.js 18+
-- PostgreSQL 15+
-- Redis 7+
+- 无需独立数据库（SQLite 文件）
+- Redis 7+（可选）
 
 #### 编译步骤
 
@@ -531,11 +531,8 @@ server:
   mode: "release"
 
 database:
-  host: "localhost"
-  port: 5432
-  user: "postgres"
-  password: "your_password"
-  dbname: "sub2api"
+  driver: "sqlite"
+  path: "./data/sub2api.db"
 
 redis:
   host: "localhost"

@@ -19,12 +19,8 @@ export interface SetupStatus {
 }
 
 export interface DatabaseConfig {
-  host: string
-  port: number
-  user: string
-  password: string
-  dbname: string
-  sslmode: string
+  driver?: string
+  path: string
 }
 
 export interface RedisConfig {

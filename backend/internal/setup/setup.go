@@ -91,14 +91,16 @@ type SetupConfig struct {
 type DatabaseConfig struct {
 	// Driver is retained for config compatibility; SQLite is the only target.
 	Driver string `json:"driver" yaml:"driver"`
-	// Path: SQLite database file path (when driver=sqlite)
-	Path     string `json:"path" yaml:"path"`
-	Host     string `json:"host" yaml:"host"`
-	Port     int    `json:"port" yaml:"port"`
-	User     string `json:"user" yaml:"user"`
-	Password string `json:"password" yaml:"password"`
-	DBName   string `json:"dbname" yaml:"dbname"`
-	SSLMode  string `json:"sslmode" yaml:"sslmode"`
+	// Path: SQLite database file path.
+	Path string `json:"path" yaml:"path"`
+	// Host/Port/User/Password/DBName/SSLMode are ignored leftovers kept so
+	// older setup JSON / YAML still unmarshals.
+	Host     string `json:"host,omitempty" yaml:"host,omitempty"`
+	Port     int    `json:"port,omitempty" yaml:"port,omitempty"`
+	User     string `json:"user,omitempty" yaml:"user,omitempty"`
+	Password string `json:"password,omitempty" yaml:"password,omitempty"`
+	DBName   string `json:"dbname,omitempty" yaml:"dbname,omitempty"`
+	SSLMode  string `json:"sslmode,omitempty" yaml:"sslmode,omitempty"`
 }
 
 // IsSQLite reports whether setup targets SQLite.
@@ -583,14 +585,8 @@ func AutoSetupFromEnv() error {
 
 	cfg := &SetupConfig{
 		Database: DatabaseConfig{
-			Driver:   dbDriver,
-			Path:     getEnvOrDefault("DATABASE_PATH", "./data/sub2api.db"),
-			Host:     getEnvOrDefault("DATABASE_HOST", "localhost"),
-			Port:     getEnvIntOrDefault("DATABASE_PORT", 5432),
-			User:     getEnvOrDefault("DATABASE_USER", ""),
-			Password: getEnvOrDefault("DATABASE_PASSWORD", ""),
-			DBName:   getEnvOrDefault("DATABASE_DBNAME", "sub2api"),
-			SSLMode:  getEnvOrDefault("DATABASE_SSLMODE", "disable"),
+			Driver: dbDriver,
+			Path:   getEnvOrDefault("DATABASE_PATH", "./data/sub2api.db"),
 		},
 		Redis: RedisConfig{
 			Enabled:   boolPtr(redisEnabled),

@@ -6,7 +6,7 @@
 
 [![Go](https://img.shields.io/badge/Go-1.26.5-00ADD8.svg)](https://golang.org/)
 [![Vue](https://img.shields.io/badge/Vue-3.4+-4FC08D.svg)](https://vuejs.org/)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-336791.svg)](https://www.postgresql.org/)
+[![SQLite](https://img.shields.io/badge/SQLite-only-003B57.svg)](https://www.sqlite.org/)
 [![Redis](https://img.shields.io/badge/Redis-7+-DC382D.svg)](https://redis.io/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](https://www.docker.com/)
 
@@ -199,7 +199,7 @@ Sub2API を拡張・統合するコミュニティプロジェクト:
 |-----------|------------|
 | バックエンド | Go 1.26.5, Gin, Ent |
 | フロントエンド | Vue 3.4+, Vite 5+, TailwindCSS |
-| データベース | PostgreSQL 15+ |
+| データベース | SQLite（本フォークの唯一の対象） |
 | キャッシュ/キュー | Redis 7+ |
 
 ---
@@ -225,8 +225,8 @@ GitHub Releases からビルド済みバイナリをダウンロードするワ�
 #### 前提条件
 
 - Linux サーバー（amd64 または arm64）
-- PostgreSQL 15+（インストール済みかつ稼働中）
-- Redis 7+（インストール済みかつ稼働中）
+- 独立したデータベースは不要（SQLite ファイル）
+- Redis 7+（任意。無効化可）
 - root 権限
 
 #### インストール手順
@@ -476,8 +476,8 @@ cd sub2api/deploy
 
 - Go 1.21+
 - Node.js 18+
-- PostgreSQL 15+
-- Redis 7+
+- 独立したデータベースは不要（SQLite ファイル）
+- Redis 7+（任意）
 
 #### ビルド手順
 
@@ -518,11 +518,8 @@ server:
   mode: "release"
 
 database:
-  host: "localhost"
-  port: 5432
-  user: "postgres"
-  password: "your_password"
-  dbname: "sub2api"
+  driver: "sqlite"
+  path: "./data/sub2api.db"
 
 redis:
   host: "localhost"

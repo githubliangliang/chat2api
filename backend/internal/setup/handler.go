@@ -69,20 +69,6 @@ func validateHostname(host string) bool {
 	return validHost.MatchString(host) && len(host) <= 253
 }
 
-// validateDBName checks if database name is safe
-func validateDBName(name string) bool {
-	// Allow only alphanumeric and underscores, starting with letter
-	validName := regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_]*$`)
-	return validName.MatchString(name) && len(name) <= 63
-}
-
-// validateUsername checks if username is safe
-func validateUsername(name string) bool {
-	// Allow only alphanumeric and underscores
-	validName := regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
-	return validName.MatchString(name) && len(name) <= 63
-}
-
 // validateEmail checks if email format is valid
 func validateEmail(email string) bool {
 	_, err := mail.ParseAddress(email)
@@ -105,13 +91,6 @@ func validatePort(port int) bool {
 	return port > 0 && port <= 65535
 }
 
-// validateSSLMode checks if SSL mode is valid
-func validateSSLMode(mode string) bool {
-	validModes := map[string]bool{
-		"disable": true, "require": true, "verify-ca": true, "verify-full": true,
-	}
-	return validModes[mode]
-}
 
 // TestDatabaseRequest represents database test request
 type TestDatabaseRequest struct {
@@ -133,49 +112,12 @@ func testDatabase(c *gin.Context) {
 		return
 	}
 
-	driver := "sqlite"
-
 	cfg := &DatabaseConfig{
-		Driver:   driver,
-		Path:     req.Path,
-		Host:     req.Host,
-		Port:     req.Port,
-		User:     req.User,
-		Password: req.Password,
-		DBName:   req.DBName,
-		SSLMode:  req.SSLMode,
+		Driver: "sqlite",
+		Path:   req.Path,
 	}
-
-	if cfg.IsSQLite() {
-		if strings.TrimSpace(cfg.Path) == "" {
-			cfg.Path = "./data/sub2api.db"
-		}
-	} else {
-		// Security: Validate all inputs to prevent injection attacks
-		if !validateHostname(req.Host) {
-			response.Error(c, http.StatusBadRequest, "Invalid hostname format")
-			return
-		}
-		if !validatePort(req.Port) {
-			response.Error(c, http.StatusBadRequest, "Invalid port number")
-			return
-		}
-		if !validateUsername(req.User) {
-			response.Error(c, http.StatusBadRequest, "Invalid username format")
-			return
-		}
-		if !validateDBName(req.DBName) {
-			response.Error(c, http.StatusBadRequest, "Invalid database name format")
-			return
-		}
-		if req.SSLMode == "" {
-			req.SSLMode = "disable"
-			cfg.SSLMode = "disable"
-		}
-		if !validateSSLMode(req.SSLMode) {
-			response.Error(c, http.StatusBadRequest, "Invalid SSL mode")
-			return
-		}
+	if strings.TrimSpace(cfg.Path) == "" {
+		cfg.Path = "./data/sub2api.db"
 	}
 
 	if err := TestDatabaseConnection(cfg); err != nil {
@@ -276,37 +218,15 @@ func install(c *gin.Context) {
 	}
 
 	req.Admin.Email = strings.TrimSpace(req.Admin.Email)
-	req.Database.Host = strings.TrimSpace(req.Database.Host)
-	req.Database.User = strings.TrimSpace(req.Database.User)
-	req.Database.DBName = strings.TrimSpace(req.Database.DBName)
+	req.Database.Path = strings.TrimSpace(req.Database.Path)
 	req.Redis.Host = strings.TrimSpace(req.Redis.Host)
 	req.Redis.Username = strings.TrimSpace(req.Redis.Username)
 
 	// ========== COMPREHENSIVE INPUT VALIDATION ==========
 	// SQLite is the only supported database target.
 	req.Database.Driver = "sqlite"
-
-	if req.Database.IsSQLite() {
-		if strings.TrimSpace(req.Database.Path) == "" {
-			req.Database.Path = "./data/sub2api.db"
-		}
-	} else {
-		if !validateHostname(req.Database.Host) {
-			response.Error(c, http.StatusBadRequest, "Invalid database hostname")
-			return
-		}
-		if !validatePort(req.Database.Port) {
-			response.Error(c, http.StatusBadRequest, "Invalid database port")
-			return
-		}
-		if !validateUsername(req.Database.User) {
-			response.Error(c, http.StatusBadRequest, "Invalid database username")
-			return
-		}
-		if !validateDBName(req.Database.DBName) {
-			response.Error(c, http.StatusBadRequest, "Invalid database name")
-			return
-		}
+	if req.Database.Path == "" {
+		req.Database.Path = "./data/sub2api.db"
 	}
 
 	// Redis validation (optional when disabled)
@@ -346,13 +266,6 @@ func install(c *gin.Context) {
 	}
 
 	// ========== SET DEFAULTS ==========
-	if req.Database.SSLMode == "" {
-		req.Database.SSLMode = "disable"
-	}
-	if !validateSSLMode(req.Database.SSLMode) {
-		response.Error(c, http.StatusBadRequest, "Invalid SSL mode")
-		return
-	}
 	if req.Server.Host == "" {
 		req.Server.Host = "0.0.0.0"
 	}

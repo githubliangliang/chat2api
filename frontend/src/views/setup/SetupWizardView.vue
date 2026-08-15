@@ -70,82 +70,14 @@
             </p>
           </div>
 
-          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div>
-              <label class="input-label">{{ t('setup.database.host') }}</label>
-              <input
-                v-model="formData.database.host"
-                type="text"
-                class="input"
-                placeholder="localhost"
-              />
-            </div>
-            <div>
-              <label class="input-label">{{ t('setup.database.port') }}</label>
-              <input
-                v-model.number="formData.database.port"
-                type="number"
-                class="input"
-                placeholder="5432"
-              />
-            </div>
-          </div>
-
-          <div class="flex items-center justify-between rounded-xl border border-gray-200 p-3 dark:border-dark-700">
-            <div>
-              <p class="text-sm font-medium text-gray-900 dark:text-white">
-                {{ t("setup.redis.enableTls") }}
-              </p>
-              <p class="text-xs text-gray-500 dark:text-dark-400">
-                {{ t("setup.redis.enableTlsHint") }}
-              </p>
-            </div>
-            <Toggle v-model="formData.redis.enable_tls" />
-          </div>
-
-          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div>
-              <label class="input-label">{{ t('setup.database.username') }}</label>
-              <input
-                v-model="formData.database.user"
-                type="text"
-                class="input"
-                placeholder="postgres"
-              />
-            </div>
-            <div>
-              <label class="input-label">{{ t('setup.database.password') }}</label>
-              <input
-                v-model="formData.database.password"
-                type="password"
-                class="input"
-                :placeholder="t('setup.database.passwordPlaceholder')"
-              />
-            </div>
-          </div>
-
-          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div>
-              <label class="input-label">{{ t('setup.database.databaseName') }}</label>
-              <input
-                v-model="formData.database.dbname"
-                type="text"
-                class="input"
-                placeholder="sub2api"
-              />
-            </div>
-            <div>
-              <label class="input-label">{{ t('setup.database.sslMode') }}</label>
-              <Select
-                v-model="formData.database.sslmode"
-                :options="[
-                  { value: 'disable', label: t('setup.database.ssl.disable') },
-                  { value: 'require', label: t('setup.database.ssl.require') },
-                  { value: 'verify-ca', label: t('setup.database.ssl.verifyCa') },
-                  { value: 'verify-full', label: t('setup.database.ssl.verifyFull') }
-                ]"
-              />
-            </div>
+          <div>
+            <label class="input-label">{{ t('setup.database.path') }}</label>
+            <input
+              v-model="formData.database.path"
+              type="text"
+              class="input"
+              :placeholder="t('setup.database.pathPlaceholder')"
+            />
           </div>
 
           <button
@@ -365,9 +297,7 @@
                 {{ t('setup.ready.database') }}
               </h3>
               <p class="text-gray-900 dark:text-white">
-                {{ formData.database.user }}@{{ formData.database.host }}:{{
-                  formData.database.port
-                }}/{{ formData.database.dbname }}
+                SQLite · {{ formData.database.path }}
               </p>
             </div>
 
@@ -503,7 +433,6 @@ import { ref, reactive, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { testDatabase, testRedis, install, type InstallRequest } from '@/api/setup'
 import { buildGatewayUrl } from '@/api/client'
-import Select from '@/components/common/Select.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import Icon from '@/components/icons/Icon.vue'
 
@@ -541,12 +470,8 @@ const getCurrentPort = (): number => {
 
 const formData = reactive<InstallRequest>({
   database: {
-    host: 'localhost',
-    port: 5432,
-    user: 'postgres',
-    password: '',
-    dbname: 'sub2api',
-    sslmode: 'disable'
+    driver: 'sqlite',
+    path: './data/sub2api.db'
   },
   redis: {
     host: 'localhost',

@@ -2,51 +2,45 @@
 
 按根目录 `new.txt` 要求，在上游 Sub2API 基础上于本仓库重构：
 
-1. **支持 SQLite 与 PostgreSQL，Redis 非必须**
+1. **仅支持 SQLite，Redis 非必须**
 2. **菜单可隐藏**（含独立「菜单管理」页面）
 
 ---
 
-## 1. 数据库：PostgreSQL | SQLite
+## 1. 数据库：SQLite
 
 ### 配置
 
 ```yaml
 database:
-  driver: "postgres"          # 或 "sqlite"
-  path: "./data/sub2api.db"   # 仅 sqlite 使用
-  # ... 其余为 postgres 连接参数
+  driver: "sqlite"            # 兼容字段，运行时一律按 sqlite 处理
+  path: "./data/sub2api.db"
 ```
 
 环境变量（auto-setup）：
 
 | 变量 | 说明 |
 |------|------|
-| `DATABASE_DRIVER` | `postgres`（默认）或 `sqlite` |
 | `DATABASE_PATH` | SQLite 文件路径，默认 `./data/sub2api.db` |
 
 ### 行为
 
-| 驱动 | Schema 来源 | 说明 |
-|------|-------------|------|
-| `postgres` | `backend/migrations/*.sql` | 注意：当前迁移文件已转为 **SQLite 方言** |
-| `sqlite` | `backend/migrations/*.sql` | 纯 Go 驱动 `modernc.org/sqlite`；启动时跑同一套 SQL 迁移 |
+运行时只打开 SQLite（`modernc.org/sqlite`）。`database.driver` / `DATABASE_DRIVER` 即使写成 `postgres` 也会被忽略。
 
 相关代码：
 
-- `backend/internal/config/config.go` — `DatabaseConfig.Driver/Path`、`NormalizedDriver()` / `IsSQLite()`
-- `backend/internal/repository/ent.go` — 双驱动打开与 schema 准备
-- `backend/internal/repository/migrations_runner.go` — 迁移执行（SQLite 跳过 advisory lock、按语句拆分执行）
+- `backend/internal/config/config.go` — `NormalizedDriver()` 固定返回 sqlite
+- `backend/internal/repository/ent.go` — 只打开 SQLite
+- `backend/internal/repository/migrations_runner.go` — 执行 SQLite 方言迁移
 - `backend/internal/repository/db_pool.go` — SQLite 连接池收敛
-- `backend/internal/setup/*` — 安装向导 / Web 安装 / auto-setup 支持 sqlite
-- `backend/scripts/pg_sql_to_sqlite.py` — PG→SQLite 迁移转换脚本
+- `backend/internal/setup/*` — 安装向导 / Web 安装 / auto-setup 只写 sqlite
+- `backend/scripts/pg_sql_to_sqlite.py` — 历史上把上游 PG 迁移转成 SQLite 的脚本
 
 ### 注意
 
-- `backend/migrations/*.sql` 已整体转换为 **SQLite 语法**（`INTEGER PRIMARY KEY AUTOINCREMENT`、`TEXT` 时间戳、`json_extract` 等）。
-- PG 专属能力（分区表、pg_trgm、plpgsql 触发器/函数、`GRANT`、部分 legacy backfill）在对应迁移中降级为 `SELECT 1` no-op。
-- 若需继续用 PostgreSQL 生产库，应另建方言目录或从 git 历史恢复 PG 版 SQL。
-- 生产高并发、多实例仍建议 **PostgreSQL**（需配套 PG 方言迁移）。
+- `backend/migrations/*.sql` 已是 **SQLite 语法**。
+- 上游 PG 专属能力（分区表、pg_trgm、plpgsql、`GRANT`、部分 legacy backfill）在对应迁移中是 `SELECT 1` no-op，不要删这些文件（checksum 不可变）。
+- 本 fork 不再提供 PostgreSQL 生产路径。上游多实例部署请回上游仓库。
 
 ---
 
@@ -185,21 +179,12 @@ docker compose -f docker-compose.sqlite.yml --env-file .env.sqlite up -d --build
 - 访问：http://localhost:8080  
 - 默认管理员：`admin@sub2api.local` / `admin123456`（见 `.env.sqlite`）
 
-### PostgreSQL + Redis + 本地构建
-
-```bash
-cd deploy
-cp .env.example .env   # 设置 POSTGRES_PASSWORD / ADMIN_PASSWORD / JWT_SECRET
-mkdir -p data postgres_data redis_data
-docker compose -f docker-compose.build.yml --env-file .env up -d --build
-```
-
 ### 相关 compose 文件
 
 | 文件 | 说明 |
 |------|------|
-| `deploy/docker-compose.sqlite.yml` | 本地 build，SQLite + 嵌入式 Redis |
-| `deploy/docker-compose.build.yml` | 本地 build，PostgreSQL + Redis |
+| `deploy/docker-compose.sqlite.yml` | 本地 build，SQLite + 嵌入式 Redis（推荐） |
+| `deploy/docker-compose.build.yml` 等 | 上游遗留编排；本 fork 进程仍只打开 SQLite |
 | `deploy/.env.sqlite.example` | SQLite 模式环境变量模板 |
 | `deploy/START_LOCAL.md` | 启动说明与排错 |
 
@@ -215,7 +200,7 @@ docker compose -f docker-compose.build.yml --env-file .env up -d --build
 ## 变更范围摘要
 
 - 基于上游 Sub2API 源码（不含上游 `.git`）
-- 配置 / 仓储 / 安装向导：双数据库 + 可选 Redis
+- 配置 / 仓储 / 安装向导：SQLite-only + 可选 Redis
 - 设置系统 + 独立菜单管理页 + 侧栏过滤
 - `deploy/config.example.yaml`、`deploy/.env.example` 文档同步
 
@@ -225,7 +210,7 @@ docker compose -f docker-compose.build.yml --env-file .env up -d --build
 sub2api/
 ├── REFACTOR.md                          # 本文档
 ├── deploy/config.example.yaml           # driver/path、redis.enabled
-├── deploy/.env.example                  # DATABASE_DRIVER、REDIS_ENABLED
+├── deploy/.env.example                  # REDIS_ENABLED（database 仅 sqlite）
 ├── backend/internal/config/config.go
 ├── backend/internal/repository/ent.go
 ├── backend/internal/repository/redis.go

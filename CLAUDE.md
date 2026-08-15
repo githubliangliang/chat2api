@@ -8,13 +8,13 @@ Fork of [Wei-Shaw/sub2api](https://github.com/Wei-Shaw/sub2api) optimized for **
 
 | Fork capability | Detail |
 |-----------------|--------|
-| SQLite | Default for personal deploy; `backend/migrations/*.sql` is **SQLite dialect** |
+| SQLite | Only supported database; `backend/migrations/*.sql` is **SQLite dialect** |
 | Redis optional | `redis.enabled: false` → in-process miniredis (single node only) |
 | Hide menus | Setting `hidden_menu_keys` + admin page `/admin/menu` |
 | Usage billing | `usage_billing_dedup` + indexes so successful requests still write usage |
 | Simple mode | `run_mode: simple` weakens SaaS/billing UI and hides several sidebar items |
 
-Upstream multi-instance / high-concurrency production still expects **PostgreSQL + external Redis**. This fork prioritizes 1C1G native deploy. Deeper notes: [REFACTOR.md](./REFACTOR.md), [DEV_GUIDE.md](./DEV_GUIDE.md), [REMOVED_PAGES.md](./REMOVED_PAGES.md), [deploy/START_NATIVE.md](./deploy/START_NATIVE.md).
+This fork is SQLite-only and prioritizes 1C1G native deploy. Upstream multi-instance production still uses PostgreSQL + external Redis. Deeper notes: [REFACTOR.md](./REFACTOR.md), [DEV_GUIDE.md](./DEV_GUIDE.md), [REMOVED_PAGES.md](./REMOVED_PAGES.md), [deploy/START_NATIVE.md](./deploy/START_NATIVE.md).
 
 **Go version:** `1.26.5` (from `backend/go.mod`). CI asserts this string; bump go.mod and workflow version checks together.
 

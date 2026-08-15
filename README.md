@@ -6,7 +6,7 @@
 
 [![Go](https://img.shields.io/badge/Go-1.26.5-00ADD8.svg)](https://golang.org/)
 [![Vue](https://img.shields.io/badge/Vue-3.4+-4FC08D.svg)](https://vuejs.org/)
-[![SQLite](https://img.shields.io/badge/SQLite-supported-003B57.svg)](https://www.sqlite.org/)
+[![SQLite](https://img.shields.io/badge/SQLite-only-003B57.svg)](https://www.sqlite.org/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](https://www.docker.com/)
 
 基于上游 [Wei-Shaw/sub2api](https://github.com/Wei-Shaw/sub2api) 的个人/单机向改动版。
@@ -21,7 +21,9 @@
 
 | 能力 | 说明 |
 |------|------|
-| **SQLite** | 可不依赖 PostgreSQL；迁移 SQL 已转为 SQLite 方言；启动时执行 `backend/migrations/*.sql` |
+| **SQLite only** | 运行时只打开 SQLite（`modernc.org/sqlite`）。`database.driver` / `DATABASE_DRIVER` 即使写成 `postgres` 也会被忽略 |
+| **安装向导** | Web / CLI / `AUTO_SETUP` 只收集 SQLite 文件路径，不再要 host/port/user/ssl |
+| **备份** | 管理页备份用 `VACUUM INTO` 打 `*.db.gz`；镜像不再带 `pg_dump` / `psql` |
 | **Redis 可选** | `REDIS_ENABLED=false` 时使用进程内嵌入式 Redis（仅单机） |
 | **菜单可隐藏** | 设置项 `hidden_menu_keys` + 管理页「菜单管理」 |
 | **用量落库** | 补齐 `usage_logs` 幂等索引与 `usage_billing_dedup` 表，避免请求成功但不写 usage |
@@ -30,7 +32,7 @@
 更细的重构说明见 [REFACTOR.md](./REFACTOR.md)。  
 1C1G 精简说明另见 [deploy/START_NATIVE.md](./deploy/START_NATIVE.md)。
 
-> **注意**：当前 `backend/migrations/*.sql` 为 **SQLite 方言**。高并发 / 多实例生产环境仍建议上游 + PostgreSQL；本仓库优先单机 SQLite 部署。
+> **注意**：本 fork **不能**连 PostgreSQL。`backend/migrations/*.sql` 是 SQLite 方言；已应用的 `SELECT 1` no-op 迁移不要删（checksum 不可变）。高并发 / 多实例请回[上游仓库](https://github.com/Wei-Shaw/sub2api)。
 
 ---
 
@@ -103,7 +105,7 @@ default:
 | 项 | 值 | 作用 |
 |----|-----|------|
 | `run_mode` | `simple` | 弱化 SaaS/计费 |
-| `database.driver` | `sqlite` | 不跑 PG |
+| `database.driver` | `sqlite` | 兼容字段，运行时一律按 sqlite |
 | `database.path` | `/opt/sub2api/data/sub2api.db` | 库文件 |
 | `redis.enabled` | `false` | 嵌入式 Redis，单机 |
 | `ops.enabled` | `false` | 关运维采集，省 CPU |
@@ -147,7 +149,8 @@ echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 
 #### 7. 备份 / 升级
 
-- **备份**：整目录 `/opt/sub2api/data`（含 `sub2api.db`、`config.yaml`）
+- **停机拷贝**：整目录 `/opt/sub2api/data`（`sub2api.db`、`sub2api.db-wal`、`sub2api.db-shm`、`config.yaml`）
+- **管理页备份**（配好 S3 后）：`VACUUM INTO` 打一致性快照，对象名 `*.db.gz`；恢复会替换线上 `.db` 并删掉 `-wal`/`-shm`
 - **升级**：本机重新 `go build` → 上传覆盖 `/opt/sub2api/sub2api` → `sudo systemctl restart sub2api`
 
 #### 不建议在 1G 机上做的事
@@ -222,30 +225,16 @@ docker compose -f docker-compose.sqlite.yml --env-file .env.sqlite ps
 
 | 变量 | 说明 |
 |------|------|
-| `DATABASE_DRIVER` | `sqlite`（本 compose 已写死） |
-| `DATABASE_PATH` | 默认 `/app/data/sub2api.db` |
+| `DATABASE_PATH` | 默认 `/app/data/sub2api.db`（`DATABASE_DRIVER` 会被忽略） |
 | `REDIS_ENABLED` | `false` = 嵌入式 Redis |
-| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | 首次自动创建管理员 |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | 首次 `AUTO_SETUP` 创建管理员 |
 | `JWT_SECRET` | 会话密钥，重建容器建议固定 |
-| `RUN_MODE` | `simple` 可跳过计费等 SaaS 能力（生产需配合确认项） |
+| `RUN_MODE` | `simple` 可跳过计费等 SaaS 能力 |
+| `SERVER_PORT` / `BIND_HOST` | 宿主机映射，默认 `8080`；本机被占时可改 `8081` |
 
 完整示例见：`deploy/.env.sqlite.example`。
 
----
-
-### 方式三：Docker Compose（PostgreSQL + Redis，接近上游）
-
-与上游一致，文档见：
-
-- https://github.com/Wei-Shaw/sub2api  
-
-本仓库也可使用 `deploy/docker-compose.yml` / `docker-compose.local.yml`（需自备 `.env`）：
-
-```bash
-cd deploy
-cp .env.example .env   # 按上游要求填写 POSTGRES_PASSWORD 等
-docker compose -f docker-compose.local.yml up -d
-```
+`deploy/docker-compose.yml` / `docker-compose.local.yml` 等是上游遗留文件，本 fork 进程仍只开 SQLite，个人部署不要用它们。
 
 ---
 
@@ -255,7 +244,7 @@ docker compose -f docker-compose.local.yml up -d
 |------|------|
 | 后端 | Go、Gin、Ent、`modernc.org/sqlite` |
 | 前端 | Vue 3、Vite、TailwindCSS |
-| 数据库 | **SQLite（推荐单机）** / PostgreSQL（上游主路径） |
+| 数据库 | **SQLite only** |
 | 缓存 | Redis 可选；可关外置、用进程内实现 |
 
 ---

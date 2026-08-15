@@ -195,20 +195,9 @@ export default {
     description: 'Configure your Sub2API instance',
     database: {
       title: 'Database Configuration',
-      description: 'Connect to your PostgreSQL database',
-      host: 'Host',
-      port: 'Port',
-      username: 'Username',
-      password: 'Password',
-      databaseName: 'Database Name',
-      sslMode: 'SSL Mode',
-      passwordPlaceholder: 'Password',
-      ssl: {
-        disable: 'Disable',
-        require: 'Require',
-        verifyCa: 'Verify CA',
-        verifyFull: 'Verify Full'
-      }
+      description: 'Choose a local SQLite database file',
+      path: 'Database file path',
+      pathPlaceholder: './data/sub2api.db'
     },
     redis: {
       title: 'Redis Configuration',
