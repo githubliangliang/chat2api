@@ -1153,7 +1153,23 @@ func TestCalculateCostWithLongContext_PropagatesError(t *testing.T) {
 func TestGetModelPricing_Grok45OfficialFallback(t *testing.T) {
 	svc := newTestBillingService()
 
-	for _, model := range []string{"grok", "grok-latest", "grok-4.5", "grok-4.5-latest", "grok-build-latest"} {
+	for _, model := range []string{"grok", "grok-latest", "grok-4.5", "grok-4.5-latest"} {
+		model := model
+		t.Run(model, func(t *testing.T) {
+			pricing, err := svc.GetModelPricing(model)
+			require.NoError(t, err)
+			require.InDelta(t, 2e-6, pricing.InputPricePerToken, 1e-12)
+			require.InDelta(t, 6e-6, pricing.OutputPricePerToken, 1e-12)
+			require.InDelta(t, 0.3e-6, pricing.CacheReadPricePerToken, 1e-12)
+			require.False(t, pricing.SupportsCacheBreakdown)
+		})
+	}
+}
+
+func TestGetModelPricing_Grok46OfficialFallback(t *testing.T) {
+	svc := newTestBillingService()
+
+	for _, model := range []string{"grok-4.6", "grok-4.6-latest"} {
 		model := model
 		t.Run(model, func(t *testing.T) {
 			pricing, err := svc.GetModelPricing(model)
@@ -1161,9 +1177,85 @@ func TestGetModelPricing_Grok45OfficialFallback(t *testing.T) {
 			require.InDelta(t, 2e-6, pricing.InputPricePerToken, 1e-12)
 			require.InDelta(t, 6e-6, pricing.OutputPricePerToken, 1e-12)
 			require.InDelta(t, 0.5e-6, pricing.CacheReadPricePerToken, 1e-12)
+			require.Equal(t, 200000, pricing.LongContextInputThreshold)
+			require.True(t, pricing.LongContextThresholdInclusive)
+			require.InDelta(t, 2.0, pricing.LongContextInputMultiplier, 1e-12)
+			require.InDelta(t, 2.0, pricing.LongContextOutputMultiplier, 1e-12)
 			require.False(t, pricing.SupportsCacheBreakdown)
 		})
 	}
+}
+
+func TestGetModelPricing_UnknownGrokTextFallsBackToGrok45(t *testing.T) {
+	svc := newTestBillingService()
+	baseline, err := svc.GetModelPricing("grok-4.5")
+	require.NoError(t, err)
+
+	for _, model := range []string{"grok-5", "grok-5-latest", "x-ai/grok-7", "grok-4.7-beta"} {
+		pricing, err := svc.GetModelPricing(model)
+		require.NoError(t, err, "model %s", model)
+		require.InDelta(t, baseline.InputPricePerToken, pricing.InputPricePerToken, 1e-12, model)
+		require.InDelta(t, baseline.OutputPricePerToken, pricing.OutputPricePerToken, 1e-12, model)
+		require.InDelta(t, baseline.CacheReadPricePerToken, pricing.CacheReadPricePerToken, 1e-12, model)
+	}
+
+	// Per-unit media ids must not inherit the text card just because they carry
+	// a version number; they are billed by the image/video/audio paths instead.
+	for _, model := range []string{"grok-2-image-1212", "grok-2-audio", "grok-5-video", "x-ai/grok-6-image"} {
+		require.False(t, isGrokUnknownTextFamilyModel(model), "model %s", model)
+	}
+	// Multimodal chat models stay token billed.
+	require.True(t, isGrokUnknownTextFamilyModel("grok-2-vision-1212"))
+
+	for _, model := range []string{
+		"grok-imagine-image-3.0",
+		"grok-imagine-video-2",
+		"grok-voice-latest",
+		"grok-web-search",
+		"grok-x-search",
+		"grok-speech-1",
+	} {
+		_, err := svc.GetModelPricing(model)
+		require.Error(t, err, "non-text grok family %s must not inherit grok-4.5 token rates", model)
+		require.ErrorIs(t, err, ErrModelPricingUnavailable)
+	}
+
+	// Known cards stay on their own rate, not the 4.5 family floor.
+	build, err := svc.GetModelPricing("grok-build-0.1")
+	require.NoError(t, err)
+	require.InDelta(t, 1e-6, build.InputPricePerToken, 1e-12)
+}
+
+func TestCalculateCost_Grok46LongContextAppliesAtInclusiveThreshold(t *testing.T) {
+	svc := newTestBillingService()
+
+	atThreshold, err := svc.CalculateCost("grok-4.6", UsageTokens{InputTokens: 200000, OutputTokens: 1000}, 1.0)
+	require.NoError(t, err)
+	require.True(t, atThreshold.LongContextBillingApplied)
+	require.InDelta(t, float64(200000)*2e-6*2, atThreshold.InputCost, 1e-10)
+	require.InDelta(t, float64(1000)*6e-6*2, atThreshold.OutputCost, 1e-10)
+
+	below, err := svc.CalculateCost("grok-4.6", UsageTokens{InputTokens: 199999, OutputTokens: 1000}, 1.0)
+	require.NoError(t, err)
+	require.False(t, below.LongContextBillingApplied)
+	require.InDelta(t, float64(199999)*2e-6, below.InputCost, 1e-10)
+	require.InDelta(t, float64(1000)*6e-6, below.OutputCost, 1e-10)
+}
+
+func TestOpenAILongContextBillingGate_SkipsNonOpenAIAccounts(t *testing.T) {
+	require.Nil(t, openAILongContextBillingGate(nil))
+	require.Nil(t, openAILongContextBillingGate(&Account{Platform: PlatformGrok}))
+
+	disabled := openAILongContextBillingGate(&Account{Platform: PlatformOpenAI})
+	require.NotNil(t, disabled)
+	require.False(t, *disabled)
+
+	enabled := openAILongContextBillingGate(&Account{
+		Platform: PlatformOpenAI,
+		Extra:    map[string]any{openAILongContextBillingEnabledKey: true},
+	})
+	require.NotNil(t, enabled)
+	require.True(t, *enabled)
 }
 
 func TestGetModelPricing_GrokCatalogFallbacks(t *testing.T) {
@@ -1194,6 +1286,7 @@ func TestGetModelPricing_GrokCatalogFallbacks(t *testing.T) {
 			name: "Grok coding and Composer family",
 			models: []string{
 				"grok-build",
+				"grok-build-latest",
 				"grok-build-0.1",
 				"grok-composer",
 				"grok-composer-2.5-fast",
