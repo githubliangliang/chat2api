@@ -30,7 +30,8 @@
 | **支付页清理** | 已移除对下线接口 `/admin/payment/providers` 的前端请求 |
 
 更细的重构说明见 [REFACTOR.md](./REFACTOR.md)。  
-1C1G 精简说明另见 [deploy/START_NATIVE.md](./deploy/START_NATIVE.md)。
+1C1G 精简说明另见 [deploy/START_NATIVE.md](./deploy/START_NATIVE.md)。  
+合上游（不要整仓 merge）：[docs/upstream-sync/README.md](./docs/upstream-sync/README.md)。
 
 > **注意**：本 fork **不能**连 PostgreSQL。`backend/migrations/*.sql` 是 SQLite 方言；已应用的 `SELECT 1` no-op 迁移不要删（checksum 不可变）。高并发 / 多实例请回[上游仓库](https://github.com/Wei-Shaw/sub2api)。
 

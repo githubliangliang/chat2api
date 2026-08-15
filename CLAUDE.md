@@ -16,6 +16,8 @@ Fork of [Wei-Shaw/sub2api](https://github.com/Wei-Shaw/sub2api) optimized for **
 
 This fork is SQLite-only and prioritizes 1C1G native deploy. Upstream multi-instance production still uses PostgreSQL + external Redis. Deeper notes: [REFACTOR.md](./REFACTOR.md), [DEV_GUIDE.md](./DEV_GUIDE.md), [REMOVED_PAGES.md](./REMOVED_PAGES.md), [deploy/START_NATIVE.md](./deploy/START_NATIVE.md).
 
+**Merging upstream:** git history was rewritten (no shared ancestor). Do **not** `git merge upstream/main`. Cherry-pick or port by feature. Process + current checklist: [docs/upstream-sync/README.md](./docs/upstream-sync/README.md), [docs/upstream-sync/PORTING-0.1.176.md](./docs/upstream-sync/PORTING-0.1.176.md).
+
 **Go version:** `1.26.5` (from `backend/go.mod`). CI asserts this string; bump go.mod and workflow version checks together.
 
 **Frontend package manager:** **pnpm only** (not npm). Commit `frontend/pnpm-lock.yaml` after dependency changes. pnpm v11 needs `frontend/pnpm-workspace.yaml` `allowBuilds` for `esbuild` / `vue-demi` postinstall.

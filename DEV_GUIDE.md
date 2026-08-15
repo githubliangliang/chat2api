@@ -11,6 +11,7 @@
 | **技术栈** | Go 后端 (Ent ORM + Gin) + Vue3 前端 (pnpm) |
 | **数据库** | SQLite（本 fork 唯一目标）；Redis 可选（单机可嵌入） |
 | **重构说明** | 见 [REFACTOR.md](./REFACTOR.md)：SQLite-only、Redis 可选、菜单可隐藏 |
+| **合上游** | 历史已重写，不要 `merge upstream/main`。流程见 [docs/upstream-sync/README.md](./docs/upstream-sync/README.md)，当前清单 [PORTING-0.1.176.md](./docs/upstream-sync/PORTING-0.1.176.md) |
 | **包管理** | 后端: go modules, 前端: **pnpm**（不是 npm） |
 
 ## 二、本地环境配置
