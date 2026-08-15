@@ -1,7 +1,7 @@
 # 移植清单：上游 v0.1.176
 
 对照日期：2026-08-15。  
-合完一项就把状态改成「已合」。P0、P1、P2 已合，P3 未动。
+合完一项就把状态改成「已合」。P0–P3 与第 8 节小 bugfix 全部已合。
 
 通用流程见 [README.md](./README.md)。
 
@@ -179,20 +179,20 @@ cd ../frontend && pnpm run typecheck && pnpm run lint:check
 
 本仓库已有 tool 形态的 `x_search` 计数/注入，没有独立端点。
 
-状态：未合
+状态：已合（2026-08-15）
 
 | 文件 | 动作 | 改什么 |
 |------|------|--------|
-| `backend/internal/handler/openai_x_search.go` | **新建** | `XSearch` 只 set `grok_x_search_endpoint` 再调 `WebSearch` |
-| `backend/internal/handler/openai_x_search_test.go` | **新建** | |
-| `backend/internal/handler/gateway_web_search.go` | 改 | 读该 flag，走 `x_search` tool + `include: x_search_call.action.sources`；接受 `allowed_x_handles` 等 |
-| `backend/internal/server/routes/gateway.go` | 改 | 分组路由 + 根路由各加 `POST /x_search`，仅 Grok（和现有 `/web_search` 并列） |
-| `backend/internal/pkg/apicompat/types.go` | 改 | 保留 x_search 过滤字段 |
-| `backend/internal/pkg/apicompat/chatcompletions_to_responses.go` | 改 | Chat↔Responses 往返 |
-| `backend/internal/pkg/apicompat/chatcompletions_responses_bridge.go` | 改 | sources 抽取 |
-| `backend/internal/pkg/apicompat/chatcompletions_x_search_test.go` | **新建** | |
-| `backend/internal/service/openai_gateway_grok.go` / `_cache.go` / `_chat_bridge.go` | 小改 | 保留 tool_choice / sources |
-| `backend/internal/handler/openai_gateway_handler.go` | 看 | 已有 composite grok `/v1/messages` 修复，合路由时别回退 |
+| `backend/internal/handler/openai_x_search.go` | 新建 | `XSearch` 只 set `grok_x_search_endpoint` 再调 `WebSearch`；请求体 + `buildGrokXSearchResponsesBody` |
+| `backend/internal/handler/openai_x_search_test.go` | 新建 | 工具字段、`input` 别名、运行时默认模型 |
+| `backend/internal/handler/gateway_web_search.go` | 改 | 读该 flag，走 `x_search` tool + `include: x_search_call.action.sources`；模型改用运行时默认；`x_search_call` 也抽 sources |
+| `backend/internal/server/routes/gateway.go` | 改 | 分组路由 + 根路由各加 `POST /x_search`，仅 Grok |
+| `backend/internal/server/routes/prompt_audit_route_coverage_test.go` | 改 | `/x_search` 归到 `gateway_web_search.go`（审计在那里做） |
+| `backend/internal/pkg/apicompat/types.go` | 改 | `ResponsesTool` / `ChatTool` 加 x_search 过滤字段 |
+| `backend/internal/pkg/apicompat/chatcompletions_to_responses.go` | 改 | Chat → Responses 保留 x_search |
+| `backend/internal/pkg/apicompat/chatcompletions_responses_bridge.go` | 改 | Responses → Chat 保留 x_search + tool_choice |
+| `backend/internal/pkg/apicompat/chatcompletions_x_search_test.go` | 新建 | 往返 + tool_choice 字符串形式 |
+| `backend/internal/service/openai_gateway_grok*.go` | 跳过 | 核对 #5571 后确认这三个文件没有 x_search 改动（文档原先的猜测不成立） |
 
 ---
 
@@ -200,9 +200,9 @@ cd ../frontend && pnpm run typecheck && pnpm run lint:check
 
 | PR | 文件 | 说明 | 状态 |
 |----|------|------|------|
-| [#5540](https://github.com/Wei-Shaw/sub2api/pull/5540) | `channel_service.go` + test | 定价冲突检测和 cache key 归一化对齐。本地已有 `normalizeChannelPricingModelName`，先 `git show` 再决定 | 未核 |
-| [#5543](https://github.com/Wei-Shaw/sub2api/pull/5543) | `admin_group.go`、`admin_service.go`、`channel_service.go`、`wire.go` | 分组改平台后失效渠道缓存。本地 `admin_group` 只见 auth cache，渠道定价缓存大概率还没失效 | 未合 |
-| [#5504](https://github.com/Wei-Shaw/sub2api/pull/5504) | `openai_apikey_responses_probe.go` + 新 test | 探测未跑完不要标「不支持 Responses」。本地 probe 还很瘦 | 未合 |
+| [#5540](https://github.com/Wei-Shaw/sub2api/pull/5540) | `channel_service.go` + test | 定价冲突检测改用 `normalizeChannelPricingModelName`，和缓存键同一套归一化；映射侧保持 ToLower | 已合 |
+| [#5543](https://github.com/Wei-Shaw/sub2api/pull/5543) | `admin_group.go`、`admin_service.go`、`channel_service.go`、`wire.go` + test | 分组改平台后失效渠道缓存；`ChannelCacheInvalidator` 窄接口，`wire_gen.go` 用 generate | 已合 |
+| [#5504](https://github.com/Wei-Shaw/sub2api/pull/5504) | `openai_apikey_responses_probe.go` + 新 test | 探测判据不成立（`incomplete/max_output_tokens`、`failed`）时保持 unknown；落标不支持时 warn | 已合 |
 
 ---
 
