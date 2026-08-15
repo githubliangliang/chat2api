@@ -1,6 +1,6 @@
 # 移植清单：上游 v0.1.176
 
-对照日期：2026-08-15。  
+对照日期：2026-08-15（当日复核：上游已发 [`v0.1.177`](https://github.com/Wei-Shaw/sub2api/releases/tag/v0.1.177)，见第 9 节）。  
 合完一项就把状态改成「已合」。P0–P3 与第 8 节小 bugfix 全部已合。
 
 通用流程见 [README.md](./README.md)。
@@ -13,17 +13,18 @@
 |----|------|
 | 改造时所称基线 | 上游 [`v0.1.173`](https://github.com/Wei-Shaw/sub2api/releases/tag/v0.1.173)（2026-08-09，`29009f0`） |
 | 中间跳过 | 没有 `v0.1.174` |
-| 上游最新正式版 | [`v0.1.176`](https://github.com/Wei-Shaw/sub2api/releases/tag/v0.1.176)（2026-08-13，Latest） |
+| 上游最新正式版 | [`v0.1.177`](https://github.com/Wei-Shaw/sub2api/releases/tag/v0.1.177)（2026-08-15 13:40 UTC，Latest）；`v0.1.176` 已不是最新 |
 | `main` 比 `v0.1.173` | 124 commits / 244 files |
 | `v0.1.176` 比 `v0.1.173` | 107 commits |
-| `main` 比 `v0.1.176` | 再超 17 commits（截至 2026-08-15） |
+| `v0.1.177` 比 `v0.1.176` | 18 commits（即原第 9 节所列 main 提交 + VERSION bump） |
+| `main` 比 `v0.1.177` | 0 commits（截至 2026-08-15，仅 VERSION sync 已含在 tag 内） |
 | 本仓库版本号 | `backend/cmd/server/VERSION` = `1.1.0`（自有编号，不要改成 0.1.176） |
 
 对比链接：
 
 - <https://github.com/Wei-Shaw/sub2api/compare/v0.1.173...v0.1.176>
 - <https://github.com/Wei-Shaw/sub2api/compare/v0.1.175...v0.1.176>
-- <https://github.com/Wei-Shaw/sub2api/compare/v0.1.176...main>
+- <https://github.com/Wei-Shaw/sub2api/compare/v0.1.176...v0.1.177>
 - 大功能 PR：[#5571](https://github.com/Wei-Shaw/sub2api/pull/5571)（86 文件）、[#5573](https://github.com/Wei-Shaw/sub2api/pull/5573)
 
 ### 本仓库不是纯 v0.1.173
@@ -47,7 +48,7 @@
 | remote compaction v2、`compaction_trigger` | 已有 | 跳过整包；`main` 后续若有补丁再对 |
 | `x-codex-turn-state` 透传 | 已有 | 跳过整包；看 `main` 的「跨账号 echo」 |
 | Composite 分组图片开关、API Key 校验 | 需逐项看 | 低优先级 |
-| **Codex OAuth 设备指纹收敛**（`off/device/session/full`） | **没有**（搜不到 `codex_fingerprint_mode`） | 值得合，但用 `main` 的 **opt-in / 默认 off**，不要合 175 的默认 session |
+| **Codex OAuth 设备指纹收敛**（`off/device/session/full`） | **已合**（2026-08-15，按 `main` 的 opt-in / 默认 off） | 已合：`openai_codex_fingerprint.go` + Forward / 透传两条路径 + 三个账号弹窗 |
 | 大文件备份分卷 | 这边是 SQLite `VACUUM INTO` | 跳过 |
 | simple mode 显示安全审计菜单 | 和 hidden menu / simple mode 会撞 | 慎合 |
 | 风控 fail-closed | 上游自己 revert 了 | **不要合** |
@@ -206,19 +207,23 @@ cd ../frontend && pnpm run typecheck && pnpm run lint:check
 
 ---
 
-## 9. v0.1.176 之后的 main（尚未发版）
+## 9. v0.1.177（2026-08-15 已发版，原「main 尚未发版」一节）
 
-<https://github.com/Wei-Shaw/sub2api/compare/v0.1.176...main>（17 commits）
+<https://github.com/Wei-Shaw/sub2api/compare/v0.1.176...v0.1.177>（18 commits；`main` 截至 2026-08-15 与 tag 一致，没有更新的提交）
 
-| 主题 | 建议 |
-|------|------|
-| Grok 长上下文只跟分组开关，不被 OpenAI 账号开关否决 | 合 P2 时一起带（#5573 已含） |
-| 未知 Grok 文本兜底排除 image/video/audio | 合 P0 时一起带（#5573 已含） |
-| Codex fingerprint 改成 **opt-in，默认 off**，并覆盖透传 | 合指纹时以这个为准 |
-| 保留 remote compaction v2、native/legacy 分流 | 已有类似实现，先 `git show` |
-| relay `x-codex-turn-state`、防跨账号 echo | 已有透传，重点看「跨账号 echo」 |
-| 分组用量日聚合 + 时区 | 刚藏过用量筛选/图表，别把大统计 UI 合回来 |
-| CI 里 Go **1.26.6** | 这边 CI 写死 `1.26.5`，升则 `go.mod` + workflow 一起改 |
+| 主题 | 上游提交 / PR | 状态与建议 |
+|------|---------------|------------|
+| Grok 长上下文只跟分组开关，不被 OpenAI 账号开关否决 | `fd82dfd5`（#5573） | **已合**（随 P2 一起带） |
+| 未知 Grok 文本兜底排除 image/video/audio | `e29b93a1`（#5573） | **已合**（随 P0 一起带） |
+| relay `x-codex-turn-state`、防跨账号 echo | `8219dcfc` + 测试补丁 `4d9fedee`（#5668） | **值得合，优先级最高**。本地只有请求侧透传（`account_header_override.go` 白名单），响应侧 relay 完全没有——上游铸造的 turn-state 头到客户端就被丢了，Codex 协议链在本网关上是断的。两个提交一起合 |
+| session-level beta features + 探测 native compaction v2 | `8ae6d8f6`（#5668） | **值得合，次优先**。本地 compact 探测仍打 legacy unary `/responses/compact`，该端点上游已下线（恒 404，#5598/#5624），管理页探测现在会把健康账号误判失败；beta 头「只在 compact 回合出现」的形态也有 #5586 风控风险。注意它依赖 fingerprint 收敛（探测身份套用账号收敛），先合下面一条 |
+| Codex fingerprint 改成 **opt-in，默认 off**，并覆盖透传 | `fce41e31`（#5668） | **已合**（2026-08-15）：`openai_codex_fingerprint.go` 取 v0.1.177 最终版；Forward / 透传两条路径共享同一份收敛 ID；只合指纹，同提交里的 turn-state 与 beta 头留给下一项 |
+| 保留 remote compaction v2、native/legacy 分流 | `9662cff2` / `a8b9ea22`（#5641） | **大部分已有，暂缓**。本地 `normalizeOpenAIResponsesCompactRequest` 已让 native v2 保持裸 `/responses` 直通（9662cff2 的核心）；缺的只有 `openai_compaction_context.go`（渠道限制按 forward model 判定的窄修复）。合 `8ae6d8f6` 时若冲突再顺手带 |
+| 分组用量日聚合 + 时区 | `cb7b0379` 等（#5649） | **不合**：本 fork 刚藏过用量筛选/图表，且聚合 SQL 面向 PG |
+| 账号页自动刷新偏好改为模块初始化时恢复 | `e215c98c`（#5573） | 可跳过：28 行前端小改，本 fork AccountsView 已简化，收益低 |
+| CI 里 Go **1.26.6** | 见 #5649 相关 CI 修复 | 低优先级 chore。本地 go.mod + 4 个 workflow 仍写死 `1.26.5`，升则一起改 |
+
+推荐合入顺序：① fingerprint（已合）→ ② turn-state relay + echo 守卫 → ③ compact 探测 v2 + beta 头。三者都在 #5668 内，文件互不重叠但语义相关。
 
 ---
 
@@ -231,7 +236,7 @@ cd ../frontend && pnpm run typecheck && pnpm run lint:check
 | 上游 `221_group_model_pricing.sql` 原文件 | PG；本地 221 已被占用 |
 | `AccountsView.vue` 大改、用量格刷新 | 和本 fork 简化过的用量 UI 冲突 |
 | 备份 leader 锁、分卷上传 | 单机 SQLite 用不上 |
-| Codex fingerprint `session` 默认 | `main` 已改 opt-in / off |
+| Codex fingerprint `session` 默认 | `v0.1.177` 已改 opt-in / off |
 | 改已应用的 `migrations/*.sql` | checksum 不可变 |
 | `wire_gen.go` 手改 | 动了 wire 就 `go generate ./cmd/server` |
 

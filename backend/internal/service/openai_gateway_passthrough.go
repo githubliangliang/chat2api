@@ -80,6 +80,28 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			body = normalizedBody
 		}
 		reqStream = gjson.GetBytes(body, "stream").Bool()
+
+		// 指纹收敛：与非透传路径同门控（仅 OAuth、legacy compact 形态跳过）。
+		// 一次性解析收敛 ID：请求体 client_metadata 在此改写（raw 字节外科
+		// 手术，透传热路径禁全量 Unmarshal），出站头改写由请求构造器读取
+		// context 中的同一份 IDs 完成（turn_id 等随机字段两侧必须一致）。
+		if !isOpenAIResponsesCompactPath(c) {
+			var clientHeaders http.Header
+			if c != nil && c.Request != nil {
+				clientHeaders = c.Request.Header
+			}
+			fpIDs := resolveCodexFingerprintIDsFromRequest(account, clientHeaders)
+			if fpIDs != nil {
+				fpBody, fpChanged, fpErr := applyCodexFingerprintClientMetadataRaw(body, fpIDs)
+				if fpErr != nil {
+					return nil, fpErr
+				}
+				if fpChanged {
+					body = fpBody
+				}
+			}
+			stageCodexFingerprintIDs(c, fpIDs)
+		}
 	}
 
 	sanitizedBody, sanitized, err := sanitizeEmptyBase64InputImagesInOpenAIBody(body)
@@ -447,6 +469,10 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	if s.cfg != nil && s.cfg.Gateway.ForceCodexCLI {
 		req.Header.Set("user-agent", codexCLIUserAgent)
 	}
+	// 指纹收敛：使用 forwardOpenAIPassthrough 中预计算的收敛 ID 改写出站头，
+	// 与请求体 client_metadata 共享同一份 IDs（与非透传路径相同的相对位置：
+	// 会话隔离之后、终态身份收口之前）。
+	applyStagedCodexFingerprintHeaders(c, account, req.Header)
 	// 终态收口：透传路径的 OAuth 与非透传完全一致；无账号自定义 UA 时回落客户端 UA。
 	if account.Type == AccountTypeOAuth {
 		enforceCodexIdentityHeadersWithUA(req.Header, s.codexIdentityOverrideUAFromRequest(c, account))
