@@ -417,9 +417,12 @@ func ProvideSchedulerSnapshotService(
 	cfg *config.Config,
 ) *SchedulerSnapshotService {
 	svc := NewSchedulerSnapshotService(cache, outboxRepo, accountRepo, groupRepo, cfg)
-	if !skipSQLiteBackgroundJobs(cfg) {
-		svc.Start()
-	}
+	// 与其它 skipSQLiteBackgroundJobs 服务不同，快照 worker 必须在 SQLite 上照常
+	// 启动：outbox poller 是管理端账号/分组变更传播到调度桶的唯一常规通道，
+	// 相关 SQL（ListAfterAndReleaseDedup / DeleteConsumedUpTo）全部为 SQLite 兼容
+	// 方言。跳过 Start 会让桶永久陈旧、outbox 行永不消费——滞留行的 dedup_key
+	// 进而把后续同 key 事件在入队时吞掉，重新启用的账号对调度器不可见。
+	svc.Start()
 	return svc
 }
 

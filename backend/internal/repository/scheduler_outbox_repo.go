@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -57,11 +58,17 @@ func (r *schedulerOutboxRepository) ListAfterAndReleaseDedup(ctx context.Context
 			payloadRaw []byte
 			accountID  sql.NullInt64
 			groupID    sql.NullInt64
+			createdRaw any
 			event      service.SchedulerOutboxEvent
 		)
-		if err := rows.Scan(&event.ID, &event.EventType, &accountID, &groupID, &payloadRaw, &event.CreatedAt); err != nil {
+		if err := rows.Scan(&event.ID, &event.EventType, &accountID, &groupID, &payloadRaw, &createdRaw); err != nil {
 			return nil, err
 		}
+		createdAt, err := scanSchedulerOutboxTime(createdRaw)
+		if err != nil {
+			return nil, fmt.Errorf("scheduler outbox row %d: %w", event.ID, err)
+		}
+		event.CreatedAt = createdAt
 		if accountID.Valid {
 			v := accountID.Int64
 			event.AccountID = &v
@@ -100,21 +107,65 @@ func (r *schedulerOutboxRepository) ListAfterAndReleaseDedup(ctx context.Context
 }
 
 func (r *schedulerOutboxRepository) FirstCreatedAtAfter(ctx context.Context, afterID int64) (time.Time, bool, error) {
-	var createdAt time.Time
+	var createdRaw any
 	err := r.db.QueryRowContext(ctx, `
 		SELECT created_at
 		FROM scheduler_outbox
 		WHERE id > $1
 		ORDER BY id ASC
 		LIMIT 1
-	`, afterID).Scan(&createdAt)
+	`, afterID).Scan(&createdRaw)
 	if err == sql.ErrNoRows {
 		return time.Time{}, false, nil
 	}
 	if err != nil {
 		return time.Time{}, false, err
 	}
+	createdAt, err := scanSchedulerOutboxTime(createdRaw)
+	if err != nil {
+		return time.Time{}, false, err
+	}
 	return createdAt, true, nil
+}
+
+// scanSchedulerOutboxTime 以列类型无关的方式解析 created_at。
+// 线上 SQLite 的 scheduler_outbox 由 EnsureSQLiteAuxTables 以 TEXT 列先建成
+//（迁移 036 的 DATETIME 定义被 IF NOT EXISTS 空转），modernc 驱动对 TEXT 列
+// 返回 string 而非 time.Time；直接 Scan(*time.Time) 会让 outbox poller 每轮
+// 报错、事件永不消费。无时区后缀的字面量按 CURRENT_TIMESTAMP 语义视为 UTC。
+func scanSchedulerOutboxTime(value any) (time.Time, error) {
+	switch v := value.(type) {
+	case time.Time:
+		return v, nil
+	case []byte:
+		return parseSchedulerOutboxTimeString(string(v))
+	case string:
+		return parseSchedulerOutboxTimeString(v)
+	default:
+		return time.Time{}, fmt.Errorf("unsupported created_at type %T", value)
+	}
+}
+
+func parseSchedulerOutboxTimeString(value string) (time.Time, error) {
+	value = strings.TrimSpace(value)
+	for _, layout := range []string{
+		"2006-01-02 15:04:05.999999999-07:00",
+		"2006-01-02T15:04:05.999999999-07:00",
+	} {
+		if t, err := time.Parse(layout, value); err == nil {
+			return t, nil
+		}
+	}
+	for _, layout := range []string{
+		"2006-01-02 15:04:05.999999999",
+		"2006-01-02T15:04:05.999999999",
+		"2006-01-02 15:04:05",
+	} {
+		if t, err := time.ParseInLocation(layout, value, time.UTC); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("unrecognized created_at literal %q", value)
 }
 
 func (r *schedulerOutboxRepository) MaxID(ctx context.Context) (int64, error) {
@@ -184,16 +235,19 @@ func enqueueSchedulerOutbox(ctx context.Context, exec sqlExecutor, eventType str
 	args := []any{eventType, accountID, groupID, payloadArg}
 	if schedulerOutboxEventSupportsDedup(eventType) {
 		dedupKey := schedulerOutboxDedupKey(eventType, accountID, groupID, payloadJSON)
-		args = append(args, dedupKey)
-		for _, q := range []string{
-			`INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload, dedup_key) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (dedup_key) WHERE dedup_key IS NOT NULL DO NOTHING`,
-			`INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload, dedup_key) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (dedup_key) DO NOTHING`,
-			`INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload, dedup_key) VALUES ($1, $2, $3, $4, $5)`,
-		} {
-			if _, err := exec.ExecContext(ctx, q, args...); err == nil {
-				return nil
-			}
+		// 同 key 旧行可能早已被消费、或被开机水位跳过而永久滞留。此前用
+		// ON CONFLICT DO NOTHING 会把新事件静默吞掉：调度桶永远学不到这次
+		// 变更（典型事故：重新启用账号后调度器仍视其为不存在）。改为先删
+		// 后插：未消费的旧行由新行取代（等价合并），已消费/滞留的旧行不再
+		// 挡路，且不依赖水位状态。单机 SQLite 单写者下两步无并发冲突。
+		if _, err := exec.ExecContext(ctx,
+			`DELETE FROM scheduler_outbox WHERE dedup_key = $1`, dedupKey); err != nil {
+			return err
 		}
+		_, err := exec.ExecContext(ctx,
+			`INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload, dedup_key) VALUES ($1, $2, $3, $4, $5)`,
+			eventType, accountID, groupID, payloadArg, dedupKey)
+		return err
 	}
 	_, err := exec.ExecContext(ctx, query, args...)
 	return err

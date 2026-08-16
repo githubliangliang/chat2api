@@ -351,9 +351,24 @@ func (s *SchedulerSnapshotService) runInitialRebuild() {
 	_ = s.coalesceFullRebuild(func() error {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
+		var bootMaxID int64
+		if s.outboxRepo != nil {
+			if maxID, err := s.outboxRepo.MaxID(ctx); err == nil {
+				bootMaxID = maxID
+			} else {
+				logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox max id read failed at startup: %v", err)
+			}
+		}
 		if err := s.rebuildFullSnapshot(ctx, "startup"); err != nil {
 			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] rebuild startup failed: %v", err)
 			return err
+		}
+		// 开机全量重建已覆盖所有既有事件，开机前的 outbox 行不会再被消费。
+		// 立即清掉这些历史行：滞留行会带着 dedup_key 永久占位，把后续同 key
+		// 事件在入队时吞掉（重新启用账号却不生效的事故根源之一）。
+		// 重建期间新产生的行 id > bootMaxID，不受影响。
+		if bootMaxID > 0 {
+			s.cleanupConsumedOutbox(bootMaxID)
 		}
 		return nil
 	})

@@ -2421,9 +2421,10 @@ func (r *accountRepository) SetSchedulable(ctx context.Context, id int64, schedu
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
 		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue schedulable change failed: account=%d err=%v", id, err)
 	}
-	if !schedulable {
-		r.syncSchedulerAccountSnapshot(ctx, id)
-	}
+	// 开启与关闭都要立即回写调度缓存的账号快照：outbox 只保证桶成员最终一致
+	// （poller 周期消费），账号级 meta 若只在关闭时同步，重新启用的账号在下一次
+	// 桶重建前会一直以 schedulable=false 的旧 meta 参与水合，被调度层拒绝。
+	r.syncSchedulerAccountSnapshot(ctx, id)
 	return nil
 }
 

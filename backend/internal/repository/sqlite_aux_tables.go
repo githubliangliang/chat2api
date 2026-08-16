@@ -59,7 +59,9 @@ func EnsureSQLiteAuxTables(ctx context.Context, db *sql.DB) error {
 		)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS user_group_rate_multipliers_user_group_key
 			ON user_group_rate_multipliers (user_id, group_id)`,
-		// Account update enqueues scheduler outbox events (worker skipped on SQLite).
+		// Scheduler outbox: the snapshot poller consumes these on SQLite too.
+		// Existing DBs may carry created_at TEXT from older builds; readers must
+		// stay column-type agnostic (see scanSchedulerOutboxTime).
 		`CREATE TABLE IF NOT EXISTS scheduler_outbox (
 			id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
 			event_type TEXT NOT NULL,
@@ -67,7 +69,7 @@ func EnsureSQLiteAuxTables(ctx context.Context, db *sql.DB) error {
 			group_id INTEGER,
 			payload TEXT,
 			dedup_key TEXT,
-			created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_scheduler_outbox_pending_dedup_key
 			ON scheduler_outbox (dedup_key) WHERE dedup_key IS NOT NULL`,
