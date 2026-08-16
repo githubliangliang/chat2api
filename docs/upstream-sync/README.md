@@ -4,7 +4,7 @@
 
 当前对照与待移植清单见 [PORTING-0.1.176.md](./PORTING-0.1.176.md)。
 
-移植上游代码前先读 [第 4 节「硬约束」](#4-硬约束)，尤其是 9–12 条（SQLite 适配的四个静默陷阱）。这几条的由来见 [第 6 节的事故复盘](#6-案例一次由-sqlite-适配引发的调度事故2026-08-16)。
+移植上游代码前先读 [第 4 节「硬约束」](#4-硬约束)，尤其是 9–12 条（SQLite 适配的四个静默陷阱）。这几条的由来见 [第 7 节的事故复盘](#7-案例一次由-sqlite-适配引发的调度事故2026-08-16)。
 
 ---
 
@@ -120,7 +120,7 @@ cd ../frontend && pnpm run typecheck && pnpm exec vitest run
 
 1. **不要把 PostgreSQL 路径合回来。** 运行时只开 SQLite。
 2. **迁移只增不改。** 已应用的 `*.sql` 改内容会 checksum 失败。个人环境可以删 `*.db` 重建，已有库不行。
-3. **上游新迁移先转 SQLite。** `backend/scripts/pg_sql_to_sqlite.py`。PG 专属（分区、`trgm`、`plpgsql`、`COMMENT ON`、`JSONB`、`IF NOT EXISTS` 多列、`IS DISTINCT FROM`）改写成 SQLite，或继续 `SELECT 1` no-op。
+3. **上游新迁移先转 SQLite。** `backend/scripts/pg_sql_to_sqlite.py`，逐条对照 [第 5 节的转换速查](#5-pg--sqlite-转换速查)。PG 专属特性（分区、`trgm`、`plpgsql`、`COMMENT ON`、`CREATE EXTENSION`）改写成 SQLite，或继续 `SELECT 1` no-op。**动手前先看 5.1**——`$N` 占位符、`RETURNING`、`IS DISTINCT FROM`、窗口函数 `PARTITION BY` 等一大批构造 SQLite 本来就支持，改了纯属白费功夫还容易引 bug。
 4. **迁移编号以本仓库为准。** 上游文件名可能和这边已占用的序号冲突（例如上游 `221_group_model_pricing.sql`，这边 `221` 已是 affiliate）。
 5. **Go 版本。** CI 断言 `1.26.5`。上游升 Go，要同时改 `backend/go.mod` 和 workflow。
 6. **前端用 pnpm。** 合了 `package.json` 必须提交 `frontend/pnpm-lock.yaml`。
@@ -136,7 +136,7 @@ go generate ./cmd/server     # 动了 wire.go
 
 8. **bcrypt / `$`。** 写 SQL 或脚本用文件，不要在 shell 里直接贴哈希。
 
-9. **「适配 SQLite」不等于「把服务关掉」。** `skipSQLiteBackgroundJobs`（`internal/service/wire.go`）会跳过整个后台服务的 `Start()`。判断依据必须是**这个服务的 SQL 是不是 PG 专属**，而不是「我们在跑 SQLite」。关错的代价是静默的：服务不启动 → 不报错 → 功能悄悄失效，直到某天现象离根因十万八千里（见第 6 节）。
+9. **「适配 SQLite」不等于「把服务关掉」。** `skipSQLiteBackgroundJobs`（`internal/service/wire.go`）会跳过整个后台服务的 `Start()`。判断依据必须是**这个服务的 SQL 是不是 PG 专属**，而不是「我们在跑 SQLite」。关错的代价是静默的：服务不启动 → 不报错 → 功能悄悄失效，直到某天现象离根因十万八千里（见第 7 节）。
 
    遇到上游服务在 SQLite 上报错，正确顺序是：**先看错在哪一条 SQL** → 能改方言就改方言 → 确实是 PG 专属特性（`COPY`、分区、`plpgsql`、advisory lock）才考虑跳过。跳过时在代码里写清楚**跳过的是哪条 SQL**，不要只写「SQLite 不支持」。
 
@@ -154,7 +154,93 @@ go generate ./cmd/server     # 动了 wire.go
 
 ---
 
-## 5. 日常节奏
+## 5. PG → SQLite 转换速查
+
+移植上游 SQL（迁移、手写 raw SQL）时对照本节。**下表全部在本仓库实际运行时验证过**：`modernc.org/sqlite` 内置 SQLite **3.51.2**，比多数「SQLite 不支持 X」的网上说法新很多。
+
+自动转换器：`backend/scripts/pg_sql_to_sqlite.py`。它只处理常见模式，复杂逻辑仍要人工过一遍。
+
+### 5.1 不用改 —— 常被误判成「SQLite 不支持」
+
+改这些等于白费功夫，还容易在改写中引入 bug：
+
+| 构造 | 说明 |
+|------|------|
+| `$1` / `$2` 占位符 | **SQLite 原生参数语法**，不是 PG 残留。全仓大量使用，不要改成 `?` |
+| `RETURNING` | 3.35+ |
+| `ON CONFLICT (a,b) DO UPDATE SET x = excluded.x` | 标准 UPSERT |
+| `ON CONFLICT (a,b) WHERE cond` | 部分索引推断，支持。**前提是那个部分唯一索引真的存在**，否则运行时报错 |
+| `OVER (PARTITION BY ...)` 窗口函数 | 支持。别和 PG 的**表分区** `PARTITION BY RANGE` 混为一谈——后者才要改写 |
+| `IS DISTINCT FROM` | 3.39+。硬约束第 3 条里曾把它列为需改写，已过时 |
+| `string_agg(x, ',')` | 3.44+。`group_concat` 也可用 |
+| JSON `->` / `->>` | 3.38+ |
+| `json_extract` / `json_set` / `json_patch` | 支持 |
+| `TRUE` / `FALSE` 字面量 | 3.23+ |
+| 递归 CTE `WITH RECURSIVE` | 支持 |
+| 单对象 `CREATE TABLE/INDEX IF NOT EXISTS` | 支持（`ALTER TABLE ADD COLUMN IF NOT EXISTS` 不支持，见下） |
+
+### 5.2 必须改写
+
+| PG | SQLite | 备注 |
+|----|--------|------|
+| `ILIKE` | `LIKE` | LIKE 对 **ASCII 默认不区分大小写**，见 5.3 |
+| `x::type` | `CAST(x AS type)` | |
+| `NOW()` | `datetime('now')` / `CURRENT_TIMESTAMP` | 都是 **UTC** |
+| `DATE_TRUNC('day', ts)` | `date(ts)` / `strftime('%Y-%m-%d', ts)` | |
+| `EXTRACT(YEAR FROM ts)` | `strftime('%Y', ts)` | 返回字符串，需要数字要 `CAST` |
+| `ts + INTERVAL '7 days'` | `datetime(ts, '+7 days')` | |
+| `AT TIME ZONE` / `TIMESTAMPTZ` | `DATETIME` + 应用层处理 | |
+| `DISTINCT ON (a)` | `ROW_NUMBER() OVER (PARTITION BY a ORDER BY ...)` 外层过滤 `rn=1` | |
+| `FOR UPDATE` / `SKIP LOCKED` | 删掉 | SQLite 单写者，靠事务本身串行 |
+| `pg_advisory_lock()` | 应用层 mutex | 参考 `TryAcquireCleanupLock` |
+| `= ANY(ARRAY[...])` | 展开成 `IN (?,?,...)` | 用 `sqlInt64In` 生成占位符 |
+| `array_agg` / `unnest` / `ARRAY[...]` | `group_concat` / JSON 数组 | |
+| `COPY t FROM STDIN` | 事务内批量 `INSERT` | |
+| `information_schema.tables` | `sqlite_master` | |
+| `SERIAL` / `BIGSERIAL` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
+| `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` | 直接 `ADD COLUMN`，**吞掉 duplicate column 错误** | SQLite 无此语法 |
+| `CREATE INDEX CONCURRENTLY` | 去掉 `CONCURRENTLY` | |
+| `COMMENT ON ...` | 删掉 | |
+| `DO $$ ... $$` / plpgsql / 触发器函数 | 改写成普通 SQL，或 `SELECT 1` no-op | |
+| `CREATE EXTENSION` / `trgm` / `tsvector` | `SELECT 1` no-op，或换 `LIKE` / FTS5 | |
+| `gen_random_uuid()` | 应用层生成 | |
+| `PARTITION BY RANGE` 表分区 | 单表 + 索引 | |
+
+### 5.3 最危险的一类：语法通过，语义不同
+
+这类**转换器和 `TestProductionSQLUsesSQLiteDialect` 都抓不到**，只有在真实数据上跑才会暴露：
+
+- **`jsonb_set` 之类不会报「函数不存在」。** SQLite 3.45+ 已有 `jsonb_*` 函数，但路径语法是 `$.k` 而不是 PG 的 `{k}`。报错会是 `bad JSON path`，甚至在某些写法下悄悄返回别的结果。**看到 `jsonb_` 一律改成 `json_` 并改写路径**。
+- **`LIKE` 的大小写规则是分裂的**：ASCII 不区分大小写（`'xy'` 匹配 `'Xy'`），非 ASCII **区分**（`'мир'` 匹配不到 `'Мир'`，`'äbc'` 匹配不到 `'ÄBC'`）。从 PG 的 `ILIKE` 改过来时，含非 ASCII 的搜索行为会变。
+- **列类型是「建表时谁先跑谁说了算」**，不是代码说了算。声明 `DATETIME` 但库里实际是 `TEXT` 时，写入不报错、读取才炸。见硬约束 10、11。
+- **SQLite 是动态类型**：往 `INTEGER` 列写字符串不会报错。PG 上靠列类型兜底的假设在这里不成立。
+- **布尔存成 0/1**，`SELECT ... WHERE flag` 行为和 PG 的 `boolean` 有差异。
+- **`datetime('now')` 是 UTC**，而 Go 写入的 `time.Time` 可能带本地时区。同一张表混进两种格式，排查时会得出完全相反的时间线结论（第 7 节踩过）。
+
+### 5.4 一个有用的诊断信号
+
+`AUTOINCREMENT` 主键在 `ON CONFLICT ... DO NOTHING` 命中冲突时**仍然消耗 id**：
+
+```
+INSERT k='a'                    -> id=1
+INSERT k='a' ON CONFLICT DO NOTHING  -> 无行，但 id=2 被吃掉
+INSERT k='b'                    -> id=3
+```
+
+所以**表里 id 跳号 = 有多少次插入被 `DO NOTHING` 静默吞掉**。第 7 节那次事故里，`scheduler_outbox` 的 id 空洞正是被吞事件的计数。查「事件为什么没落库」时，先看 id 连不连续。
+
+### 5.5 验证手段
+
+```bash
+# 静态：扫 internal/ + cmd/ 所有字符串字面量里的 PG 专属语法（24 类模式）
+go test ./internal/repository/ -run TestProductionSQLUsesSQLiteDialect -count=1
+```
+
+这个测试能拦 5.2 的大部分，但**拦不住 5.3**。改完 SQL 一定要在真实（或复制的）库上跑一遍，别只靠单测里的临时建表——临时表的列类型是你自己写的，正好绕开了最容易出问题的那一类。
+
+---
+
+## 6. 日常节奏
 
 ```text
 偶尔     git fetch upstream
@@ -169,7 +255,7 @@ go generate ./cmd/server     # 动了 wire.go
 
 ---
 
-## 6. 案例：一次由 SQLite 适配引发的调度事故（2026-08-16）
+## 7. 案例：一次由 SQLite 适配引发的调度事故（2026-08-16）
 
 修复提交 `c35a482`。放在这里是因为**根因全部出在 fork 的 SQLite 适配上**，移植上游时最容易再次种下同类问题。
 

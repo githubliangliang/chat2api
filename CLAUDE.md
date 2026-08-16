@@ -118,12 +118,12 @@ migrations/         Ordered SQL migrations (currently SQLite dialect)
 ## SQLite-specific constraints (this fork)
 
 1. **Migrations are SQLite SQL.** PG features (partitioning, trgm, plpgsql, some backfills) are no-ops (`SELECT 1`). Do not assume PG-only SQL runs. Converter: `backend/scripts/pg_sql_to_sqlite.py`.
-2. **Timestamps:** use `DATETIME` (not `TEXT`) for `*_at` columns so `modernc.org/sqlite` can scan into `time.Time`. DSN must include `_time_format=sqlite` (`DatabaseConfig.sqliteDSN`, setup DSN builder).
+2. **Timestamps:** use `DATETIME` (not `TEXT`) for `*_at` columns so `modernc.org/sqlite` can scan into `time.Time`. DSN must include `_time_format=sqlite` (`DatabaseConfig.sqliteDSN`, setup DSN builder). **Readers must not assume the write-side rule held**: existing DBs may carry `TEXT` columns created by older builds (aux table vs migration disagreement), and modernc returns `string` for those, so `Scan(*time.Time)` fails. Scan such columns type-agnostically (`scanSchedulerOutboxTime`).
 3. **Statement splitting:** `splitSQLStatements` in `migrations_runner.go` must ignore `;` inside comments/strings. Naive split breaks large files (e.g. `033_ops_monitoring_vnext.sql`).
 4. **Checksum immutability:** changing an already-applied migration file fails checksum on existing DBs. Prefer new migration files; for personal wipe-and-recreate, deleting `*.db` is acceptable.
-5. **Safety-net tables:** `EnsureSQLiteAuxTables` creates tables some no-op migrations omitted (e.g. `user_allowed_groups`). Login loads allowed groups — missing table → 503 on login.
+5. **Safety-net tables:** `EnsureSQLiteAuxTables` creates tables some no-op migrations omitted (e.g. `user_allowed_groups`). Login loads allowed groups — missing table → 503 on login. Its DDL must match the migration column-for-column: both use `IF NOT EXISTS`, whichever runs first wins (usually the aux table), so a mismatch makes the migration file misleading.
 6. **Embedded Redis:** fine for one process; multi-instance needs real Redis.
-7. **Some background jobs still emit PG SQL** (`COPY`, `$1` placeholders) on SQLite — often logged as non-fatal; ops should stay `enabled: false` for 1C1G.
+7. **Disabling a background service is not a SQLite adaptation.** `skipSQLiteBackgroundJobs` (`internal/service/wire.go`) skips a service's whole `Start()`. Justify it per-SQL, never by "we run SQLite" — a skipped service throws no error, so the feature just silently stops working (this caused the `c35a482` scheduler outage). Still skipped and unaudited: `UsageCleanupService`, `AccountExpiryService`, `ScheduledTestRunnerService` (so `auto_pause_on_expired` does not fire). Verified clean as of 2026-08-16: no `COPY` / `pg_dump` / PG-only SQL in production code, and `$1`-style placeholders are native SQLite parameter syntax, not a PG remnant. PG→SQLite dialect reference: [docs/upstream-sync/README.md §5](./docs/upstream-sync/README.md).
 
 ## Development pitfalls (repo-specific)
 
