@@ -24,7 +24,7 @@ func TestProxyUpdateInvalidatesBoundProbeSnapshotsAndEnqueuesOutboxAtomically(t 
 	t.Cleanup(func() { _ = client.Close() })
 
 	mock.ExpectBegin()
-	mock.ExpectQuery(`(?s)` + regexp.QuoteMeta("SELECT protocol, host, port") + `.*` + regexp.QuoteMeta("FOR NO KEY UPDATE")).
+	mock.ExpectQuery(`(?s)` + regexp.QuoteMeta("SELECT protocol, host, port") + `.*` + regexp.QuoteMeta("WHERE id = $1 AND deleted_at IS NULL")).
 		WithArgs(int64(9)).
 		WillReturnRows(sqlmock.NewRows([]string{"protocol", "host", "port", "username", "password", "status"}).
 			AddRow("http", "old.example", 8080, "user", "pass", service.StatusActive))
@@ -33,7 +33,14 @@ func TestProxyUpdateInvalidatesBoundProbeSnapshotsAndEnqueuesOutboxAtomically(t 
 		WithArgs(int64(9)).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	expectProxyUpdateReload(mock, 9, "new.example", "user", "pass")
-	mock.ExpectQuery(`(?s)UPDATE accounts.*- 'upstream_billing_probe'.*- 'ollama_cloud_usage_snapshot'.*type = 'apikey'.*extra \? 'upstream_billing_probe'.*platform IN \('openai', 'anthropic'\).*extra \? 'ollama_cloud_usage_snapshot'.*RETURNING id`).
+	mock.ExpectQuery(`(?s)` +
+		regexp.QuoteMeta("UPDATE accounts") + `.*` +
+		regexp.QuoteMeta("json_remove(COALESCE(extra, '{}'), '$.upstream_billing_probe', '$.ollama_cloud_usage_snapshot')") + `.*` +
+		regexp.QuoteMeta("type = 'apikey'") + `.*` +
+		regexp.QuoteMeta("json_type(extra, '$.upstream_billing_probe')") + `.*` +
+		regexp.QuoteMeta("platform IN ('openai', 'anthropic')") + `.*` +
+		regexp.QuoteMeta("json_type(extra, '$.ollama_cloud_usage_snapshot')") + `.*` +
+		regexp.QuoteMeta("RETURNING id")).
 		WithArgs(int64(9)).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(17)).AddRow(int64(18)))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload)")).
@@ -67,7 +74,7 @@ func TestProxyUpdateRollsBackWhenProbeInvalidationOutboxFails(t *testing.T) {
 	t.Cleanup(func() { _ = client.Close() })
 
 	mock.ExpectBegin()
-	mock.ExpectQuery(`(?s)` + regexp.QuoteMeta("SELECT protocol, host, port") + `.*` + regexp.QuoteMeta("FOR NO KEY UPDATE")).
+	mock.ExpectQuery(`(?s)` + regexp.QuoteMeta("SELECT protocol, host, port") + `.*` + regexp.QuoteMeta("WHERE id = $1 AND deleted_at IS NULL")).
 		WithArgs(int64(9)).
 		WillReturnRows(sqlmock.NewRows([]string{"protocol", "host", "port", "username", "password", "status"}).
 			AddRow("http", "old.example", 8080, "", "", service.StatusActive))
@@ -76,7 +83,14 @@ func TestProxyUpdateRollsBackWhenProbeInvalidationOutboxFails(t *testing.T) {
 		WithArgs(int64(9)).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	expectProxyUpdateReload(mock, 9, "new.example", "", "")
-	mock.ExpectQuery(`(?s)UPDATE accounts.*- 'upstream_billing_probe'.*- 'ollama_cloud_usage_snapshot'.*type = 'apikey'.*extra \? 'upstream_billing_probe'.*platform IN \('openai', 'anthropic'\).*extra \? 'ollama_cloud_usage_snapshot'.*RETURNING id`).
+	mock.ExpectQuery(`(?s)` +
+		regexp.QuoteMeta("UPDATE accounts") + `.*` +
+		regexp.QuoteMeta("json_remove(COALESCE(extra, '{}'), '$.upstream_billing_probe', '$.ollama_cloud_usage_snapshot')") + `.*` +
+		regexp.QuoteMeta("type = 'apikey'") + `.*` +
+		regexp.QuoteMeta("json_type(extra, '$.upstream_billing_probe')") + `.*` +
+		regexp.QuoteMeta("platform IN ('openai', 'anthropic')") + `.*` +
+		regexp.QuoteMeta("json_type(extra, '$.ollama_cloud_usage_snapshot')") + `.*` +
+		regexp.QuoteMeta("RETURNING id")).
 		WithArgs(int64(9)).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(17)))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload)")).
@@ -100,7 +114,7 @@ func TestProxyUpdateSkipsProbeInvalidationForNonIdentityChange(t *testing.T) {
 	t.Cleanup(func() { _ = client.Close() })
 
 	mock.ExpectBegin()
-	mock.ExpectQuery(`(?s)` + regexp.QuoteMeta("SELECT protocol, host, port") + `.*` + regexp.QuoteMeta("FOR NO KEY UPDATE")).
+	mock.ExpectQuery(`(?s)` + regexp.QuoteMeta("SELECT protocol, host, port") + `.*` + regexp.QuoteMeta("WHERE id = $1 AND deleted_at IS NULL")).
 		WithArgs(int64(9)).
 		WillReturnRows(sqlmock.NewRows([]string{"protocol", "host", "port", "username", "password", "status"}).
 			AddRow("http", "same.example", 8080, "", "", service.StatusActive))

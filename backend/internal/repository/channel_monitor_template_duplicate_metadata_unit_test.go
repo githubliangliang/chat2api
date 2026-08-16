@@ -4,6 +4,7 @@ package repository
 
 import (
 	"context"
+	"regexp"
 	"testing"
 	"time"
 
@@ -40,12 +41,13 @@ func TestApplyChannelMonitorTemplatePreservesDuplicateOperationMetadataAtomicall
 			service.MonitorAPIModeResponses,
 		).
 		WillReturnResult(sqlmock.NewResult(0, 2))
-	mock.ExpectExec(`(?s)UPDATE channel_monitors\s+SET extra_headers = \$1::jsonb \|\| CASE\s+WHEN COALESCE\(extra_headers, '\{\}'::jsonb\) \? \(\$2::text\)\s+THEN jsonb_build_object\(\$2::text, COALESCE\(extra_headers, '\{\}'::jsonb\) -> \(\$2::text\)\)\s+ELSE '\{\}'::jsonb\s+END\s+WHERE template_id = \$3\s+AND id = ANY\(\$4\)\s+AND provider = \$5\s+AND api_mode = \$6`).
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE channel_monitors SET extra_headers = json_set(json_patch(COALESCE(extra_headers, '{}'), json($1)), '$.' || $2, json_extract(COALESCE(extra_headers, '{}'), '$.' || $2)) WHERE template_id = $3 AND id IN ($4,$5) AND provider = $6 AND api_mode = $7`)).
 		WithArgs(
 			`{"User-Agent":"template-client"}`,
 			service.ChannelMonitorDuplicateOperationIDMetadataKey,
 			templateID,
-			`{41,42}`,
+			monitorIDs[0],
+			monitorIDs[1],
 			service.MonitorProviderOpenAI,
 			service.MonitorAPIModeResponses,
 		).
@@ -73,12 +75,13 @@ func TestApplyChannelMonitorTemplateRollsBackWhenHeaderRowCountDiffers(t *testin
 	expectChannelMonitorTemplateForApply(mock, templateID)
 	mock.ExpectExec(`(?s)UPDATE "channel_monitors" SET .*WHERE `).
 		WillReturnResult(sqlmock.NewResult(0, 2))
-	mock.ExpectExec(`(?s)UPDATE channel_monitors\s+SET extra_headers = \$1::jsonb \|\| CASE.*jsonb_build_object\(\$2::text,.*WHERE template_id = \$3.*AND id = ANY\(\$4\)`).
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE channel_monitors SET extra_headers = json_set(json_patch(COALESCE(extra_headers, '{}'), json($1)), '$.' || $2, json_extract(COALESCE(extra_headers, '{}'), '$.' || $2)) WHERE template_id = $3 AND id IN ($4,$5) AND provider = $6 AND api_mode = $7`)).
 		WithArgs(
 			`{"User-Agent":"template-client"}`,
 			service.ChannelMonitorDuplicateOperationIDMetadataKey,
 			templateID,
-			`{41,42}`,
+			int64(41),
+			int64(42),
 			service.MonitorProviderOpenAI,
 			service.MonitorAPIModeResponses,
 		).

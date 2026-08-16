@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"reflect"
 	"strings"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
@@ -76,6 +77,20 @@ func translatePersistenceError(err error, notFound, conflict *infraerrors.Applic
 func isUniqueConstraintViolation(err error) bool {
 	if err == nil {
 		return false
+	}
+	// A typed-nil error (e.g. (*pq.Error)(nil) stored in the interface) would
+	// panic inside err.Error(); treat it as no violation.
+	if v := reflect.ValueOf(err); v.Kind() == reflect.Pointer && v.IsNil() {
+		return false
+	}
+
+	// PG drivers surface the violation class via SQLSTATE ("23505" =
+	// unique_violation) rather than the message; other codes fall through to
+	// message matching. The interface keeps lib/pq out of production imports
+	// (enforced by the sqlite dialect audit).
+	var stateErr interface{ SQLState() string }
+	if errors.As(err, &stateErr) && stateErr.SQLState() == "23505" {
+		return true
 	}
 
 	msg := strings.ToLower(err.Error())

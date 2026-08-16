@@ -29,16 +29,13 @@ func newSessionIDUsageLog(sessionID *string) *service.UsageLog {
 }
 
 // TestPrepareUsageLogInsert_SessionIDArgWiring pins the session_id column to the
-// arg slice / arg-type table so the five INSERT column lists stay in sync. session_id
-// is the penultimate arg (created_at is always last).
+// arg slice so the INSERT column lists stay in sync. session_id is the
+// penultimate arg (created_at is always last).
 func TestPrepareUsageLogInsert_SessionIDArgWiring(t *testing.T) {
-	require.Len(t, usageLogInsertArgTypes, 59, "arg-type table must include session_id")
-
 	sessionID := "sess-persisted-123"
 	prepared := prepareUsageLogInsert(newSessionIDUsageLog(&sessionID))
 
-	require.Len(t, prepared.args, len(usageLogInsertArgTypes),
-		"prepared args must match the arg-type table length")
+	require.Len(t, prepared.args, 59, "arg slice must include session_id")
 
 	// created_at is last; session_id is the arg immediately before it.
 	sessionArg := prepared.args[len(prepared.args)-2]
@@ -46,9 +43,6 @@ func TestPrepareUsageLogInsert_SessionIDArgWiring(t *testing.T) {
 	require.True(t, ok, "session_id arg should be a sql.NullString, got %T", sessionArg)
 	require.True(t, ns.Valid)
 	require.Equal(t, sessionID, ns.String)
-
-	require.Equal(t, "text", usageLogInsertArgTypes[len(usageLogInsertArgTypes)-2],
-		"session_id arg type must be text")
 }
 
 // TestPrepareUsageLogInsert_SessionIDNullWhenAbsent proves an absent session id is
