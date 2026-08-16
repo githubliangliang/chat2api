@@ -148,9 +148,11 @@ func scanSchedulerOutboxTime(value any) (time.Time, error) {
 
 func parseSchedulerOutboxTimeString(value string) (time.Time, error) {
 	value = strings.TrimSpace(value)
+	// 带时区的形态：Z07:00 同时吃 "Z"（sqlite_pg_compat 的 NOW() 返回
+	// RFC3339Nano UTC）和 "+08:00"（Go time.Time 经 ent 写入）。
 	for _, layout := range []string{
-		"2006-01-02 15:04:05.999999999-07:00",
-		"2006-01-02T15:04:05.999999999-07:00",
+		"2006-01-02T15:04:05.999999999Z07:00",
+		"2006-01-02 15:04:05.999999999Z07:00",
 	} {
 		if t, err := time.Parse(layout, value); err == nil {
 			return t, nil

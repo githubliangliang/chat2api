@@ -6,6 +6,8 @@
 
 移植上游代码前先读 [第 4 节「硬约束」](#4-硬约束)，尤其是 9–12 条（SQLite 适配的四个静默陷阱）。这几条的由来见 [第 7 节的事故复盘](#7-案例一次由-sqlite-适配引发的调度事故2026-08-16)。
 
+写 / 改 SQL 时对照 [第 5 节「PG → SQLite 转换速查」](#5-pg--sqlite-转换速查)。上一次 PG 残留核查的结论与复查命令：[PG-REMNANTS-AUDIT.md](./PG-REMNANTS-AUDIT.md)（2026-08-16，基线 `a8ccd19`）。
+
 ---
 
 ## 1. 仓库关系
@@ -178,6 +180,7 @@ go generate ./cmd/server     # 动了 wire.go
 | `TRUE` / `FALSE` 字面量 | 3.23+ |
 | 递归 CTE `WITH RECURSIVE` | 支持 |
 | 单对象 `CREATE TABLE/INDEX IF NOT EXISTS` | 支持（`ALTER TABLE ADD COLUMN IF NOT EXISTS` 不支持，见下） |
+| `NOW()` / `GREATEST` / `LEAST` / `TO_CHAR` / `HOST` | **本仓库自己补的兼容函数**，见 `sqlite_pg_compat.go`。原样保留即可，但注意 `NOW()` 返回的是 RFC3339Nano **字符串**（带 `Z`），和 `CURRENT_TIMESTAMP` 的格式不同；`TO_CHAR` 只实现了 4 种格式串 |
 
 ### 5.2 必须改写
 
@@ -185,7 +188,6 @@ go generate ./cmd/server     # 动了 wire.go
 |----|--------|------|
 | `ILIKE` | `LIKE` | LIKE 对 **ASCII 默认不区分大小写**，见 5.3 |
 | `x::type` | `CAST(x AS type)` | |
-| `NOW()` | `datetime('now')` / `CURRENT_TIMESTAMP` | 都是 **UTC** |
 | `DATE_TRUNC('day', ts)` | `date(ts)` / `strftime('%Y-%m-%d', ts)` | |
 | `EXTRACT(YEAR FROM ts)` | `strftime('%Y', ts)` | 返回字符串，需要数字要 `CAST` |
 | `ts + INTERVAL '7 days'` | `datetime(ts, '+7 days')` | |
