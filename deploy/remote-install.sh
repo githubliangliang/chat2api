@@ -78,10 +78,13 @@ else
   TMP_CONF="$(mktemp)"
   sed -e "s#/opt/sub2api#$APP_DIR#g" "$HERE/config.personal.sqlite.yaml" >"$TMP_CONF"
   JWT_SECRET="$(openssl rand -hex 32 2>/dev/null || od -An -tx1 -N32 /dev/urandom | tr -d ' \n')"
+  # TOTP 密钥必须固定：留空由程序每次启动随机生成，重启即作废已绑定的 2FA
+  TOTP_KEY="$(openssl rand -hex 32 2>/dev/null || od -An -tx1 -N32 /dev/urandom | tr -d ' \n')"
   if [ -z "$ADMIN_PASSWORD" ]; then
     ADMIN_PASSWORD="$(openssl rand -hex 9 2>/dev/null || od -An -tx1 -N9 /dev/urandom | tr -d ' \n')"
   fi
   sed -i -e "s#CHANGE_ME_openssl_rand_hex_32#$JWT_SECRET#" \
+         -e "s#CHANGE_ME_totp_hex_32#$TOTP_KEY#" \
          -e "s#CHANGE_ME_STRONG_PASSWORD#$ADMIN_PASSWORD#" "$TMP_CONF"
   if [ -n "$ADMIN_EMAIL" ]; then
     sed -i -e "s#admin@example.com#$ADMIN_EMAIL#" "$TMP_CONF"
@@ -89,7 +92,7 @@ else
   sudo_run install -m 0640 "$TMP_CONF" "$CONF_FILE"
   rm -f "$TMP_CONF"
   NEW_CONFIG=1
-  log "已生成 $CONF_FILE（jwt.secret 随机）"
+  log "已生成 $CONF_FILE（jwt.secret / totp.encryption_key 随机）"
   log "初始管理员：${ADMIN_EMAIL:-admin@example.com} / $ADMIN_PASSWORD"
 fi
 # ---------- 4. systemd unit：缺失才写，已有的不动（除非 FORCE_UNIT=1）----------

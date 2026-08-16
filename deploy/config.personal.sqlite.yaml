@@ -63,6 +63,12 @@ jwt:
   secret: "CHANGE_ME_openssl_rand_hex_32"
   expire_hour: 168
 
+# 2FA(TOTP) 与支付 resume token 的 AES-256 密钥，必须是 32 字节 hex（64 位）
+# 留空则每次启动随机生成：重启后已绑定的 2FA 全部失效，支付 resume token 也不可用
+# 换掉这个值 = 作废所有已绑定的 2FA，部署后不要再改
+totp:
+  encryption_key: "CHANGE_ME_totp_hex_32"
+
 timezone: "Asia/Shanghai"
 
 default:

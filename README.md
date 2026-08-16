@@ -96,10 +96,16 @@ sudo nano /opt/sub2api/data/config.yaml
 jwt:
   secret: "用 openssl rand -hex 32 生成"
 
+totp:
+  encryption_key: "用 openssl rand -hex 32 生成（必须 64 位 hex）"
+
 default:
   admin_email: "你的邮箱"
   admin_password: "强密码"
 ```
+
+> `totp.encryption_key` 留空时程序**每次启动都会随机生成一个**：重启后所有已绑定的 2FA 立即失效，支付 resume token 也不可用。部署前就填好，之后别再改（换掉 = 作废所有已有绑定）。格式必须是 32 字节 hex，写错服务会直接启动失败。
+> 用 `deploy/deploy-remote.sh` 首次部署时，该密钥会和 `jwt.secret` 一起自动随机生成，不用手填。
 
 模板已默认的关键项：
 
@@ -109,7 +115,7 @@ default:
 | `database.driver` | `sqlite` | 兼容字段，运行时一律按 sqlite |
 | `database.path` | `/opt/sub2api/data/sub2api.db` | 库文件 |
 | `redis.enabled` | `false` | 嵌入式 Redis，单机 |
-| `ops.enabled` | `false` | 关运维采集，省 CPU |
+| `ops.enabled` | `true` | 开错误/系统日志与每天 03:00 定时清理；聚合 `aggregation`、采集缓存仍关，省 CPU |
 | 连接池 | 2 | 省内存 |
 
 配置模板：`deploy/config.personal.sqlite.yaml`。
@@ -151,8 +157,9 @@ echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 #### 7. 备份 / 升级
 
 - **停机拷贝**：整目录 `/opt/sub2api/data`（`sub2api.db`、`sub2api.db-wal`、`sub2api.db-shm`、`config.yaml`）
+  - `config.yaml` 里有 `jwt.secret` 和 `totp.encryption_key`，丢了等于所有会话失效 + 已绑定的 2FA 全部作废，必须一起备份
 - **管理页备份**（配好 S3 后）：`VACUUM INTO` 打一致性快照，对象名 `*.db.gz`；恢复会替换线上 `.db` 并删掉 `-wal`/`-shm`
-- **升级**：本机重新 `go build` → 上传覆盖 `/opt/sub2api/sub2api` → `sudo systemctl restart sub2api`
+- **升级**：本机重新 `go build` → 上传覆盖 `/opt/sub2api/sub2api` → `sudo systemctl restart sub2api`（或用 `deploy/deploy-remote.sh` 一条命令跑完构建 → 上传 → 重启 → 健康检查，失败自动回滚；已有 `config.yaml` 不会被覆盖）
 
 #### 不建议在 1G 机上做的事
 
