@@ -30,19 +30,20 @@
 
 `internal/repository/sqlite_pg_compat.go` 用 `sqlite.RegisterScalarFunction` 给 SQLite **补了 5 个 PG 函数**，让大量原样保留的 PG 风格 raw SQL 能跑：
 
-| 函数 | 实现 | 用在哪 |
-|------|------|--------|
+| 函数 | 实现 | 现有调用点（2026-08-16 逐一核对） |
+|------|------|-----------------------------------|
 | `NOW()` | 返回 `time.Now().UTC().Format(time.RFC3339Nano)`——**字符串，带 `Z` 后缀** | **55 处**仓储 SQL 的 `updated_at` / `deleted_at` 戳记 |
-| `GREATEST` / `LEAST` | 多参数数值比较 | 余额增减等 |
-| `TO_CHAR(ts, fmt)` | 只实现了 4 种用量分析用的格式，其余尽力映射 | 用量趋势按小时/天/周/月分桶 |
-| `HOST(inet)` | 原样返回（SQLite 里 `client_ip` 就是 TEXT） | 审计日志 |
+| `GREATEST` / `LEAST` | 全数值走数值比较；否则按时间序、再退字典序；忽略 `NULL` | 3 处：`user_repo.go:840`（余额钳位）、`:1061`（并发钳位）均为数值；`ops_ingress_reject_repo.go:63-64` 比较**时间戳** |
+| `TO_CHAR(ts, fmt)` | 只实现 4 种格式，其余尽力映射 | **0 处——死代码。** 用量分析已改用 `strftime`（`usage_log_repo_trend.go:43`）。`safeDateFormat` / `dateFormatWhitelist` 只被自己的单测调用 |
+| `HOST(inet)` | 原样返回（SQLite 里 `client_ip` 就是 TEXT） | 3 处：`ops_ingress_reject_repo.go:128`、`ops_repo.go:259`、`:435` |
 
-**这不是残留，是有意的适配层**，但有两个必须知道的后果：
+**这不是残留，是有意的适配层**，但有三个必须知道的后果：
 
 1. **`NOW()` 写进去的是 RFC3339Nano 字符串**，和 `CURRENT_TIMESTAMP` / `datetime('now')` 的 `2006-01-02 15:04:05` 格式**不一样**。同一张表可能混进多种时间格式，读取端必须全覆盖（见 `parseSchedulerOutboxTimeString` 及其回归测试）。本次审计就发现该函数漏了带 `Z` 的形态，已补。
-2. **`TO_CHAR` 只是尽力而为**，不是完整 PG 语义。移植上游新的 `TO_CHAR` 用法前，先确认格式串在这 4 种之内，否则会静默走到 fallback 分支给出错结果。
+2. **`GREATEST`/`LEAST` 曾经只会比数值。** 首个参数非数值时旧实现直接原样返回，根本不比较——`ops_ingress_reject_repo` 用它比较时间戳，后果是聚合行的 `last_seen` 冻结在首次写入时刻。线上该表只有 1 行且 `request_count=1`（同一 key 从未命中第二次），所以尚未显形。已修并加回归测试。
+3. **`TO_CHAR` 只是尽力而为**，不是完整 PG 语义。当前无人调用，但如果移植上游新的 `TO_CHAR` 用法，先确认格式串在那 4 种之内，否则会静默走 fallback 给出错结果。
 
-移植上游 raw SQL 时：**看到 `NOW()` / `GREATEST` / `TO_CHAR` 不用改**，但要意识到它们走的是这层 shim；用到 shim 之外的 PG 函数就必须改写或扩展这个文件。
+移植上游 raw SQL 时：**看到 `NOW()` / `GREATEST` / `LEAST` / `HOST` 不用改**，但要意识到它们走的是这层 shim；用到 shim 之外的 PG 函数（或给 `TO_CHAR` 传新格式串）就必须改写或扩展这个文件。
 
 ---
 

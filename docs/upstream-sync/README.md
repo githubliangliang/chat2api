@@ -180,7 +180,7 @@ go generate ./cmd/server     # 动了 wire.go
 | `TRUE` / `FALSE` 字面量 | 3.23+ |
 | 递归 CTE `WITH RECURSIVE` | 支持 |
 | 单对象 `CREATE TABLE/INDEX IF NOT EXISTS` | 支持（`ALTER TABLE ADD COLUMN IF NOT EXISTS` 不支持，见下） |
-| `NOW()` / `GREATEST` / `LEAST` / `TO_CHAR` / `HOST` | **本仓库自己补的兼容函数**，见 `sqlite_pg_compat.go`。原样保留即可，但注意 `NOW()` 返回的是 RFC3339Nano **字符串**（带 `Z`），和 `CURRENT_TIMESTAMP` 的格式不同；`TO_CHAR` 只实现了 4 种格式串 |
+| `NOW()` / `GREATEST` / `LEAST` / `TO_CHAR` / `HOST` | **本仓库自己补的兼容函数**，见 `sqlite_pg_compat.go`（清单与调用点见 [PG-REMNANTS-AUDIT.md](./PG-REMNANTS-AUDIT.md)）。原样保留即可，但注意 `NOW()` 返回 RFC3339Nano **字符串**（带 `Z`），和 `CURRENT_TIMESTAMP` 格式不同；`TO_CHAR` 只实现 4 种格式串 |
 
 ### 5.2 必须改写
 

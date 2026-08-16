@@ -139,28 +139,81 @@ func sqliteNumericExtreme(max bool) func(*sqlite.FunctionContext, []driver.Value
 		if len(args) == 0 {
 			return nil, fmt.Errorf("greatest/least requires at least 1 argument")
 		}
-		best, ok := asFloat64(args[0])
+		// PG 语义：忽略 NULL，全为 NULL 才返回 NULL。
+		operands := make([]driver.Value, 0, len(args))
+		for _, arg := range args {
+			if arg != nil {
+				operands = append(operands, arg)
+			}
+		}
+		if len(operands) == 0 {
+			return nil, nil
+		}
+		if result, ok := numericExtreme(max, operands); ok {
+			return result, nil
+		}
+		// 非数值：时间戳与字符串同样需要比较。旧实现在这里直接返回
+		// operands[0]，导致 GREATEST(last_seen, EXCLUDED.last_seen) 永远保留
+		// 旧值——聚合行的 last_seen 会冻结在首次写入的时刻。
+		return comparableExtreme(max, operands), nil
+	}
+}
+
+// numericExtreme 在全部操作数均为数值时返回极值；只要有一个不是数值就放弃，
+// 交给 comparableExtreme，避免把时间戳按 0 参与比较。
+func numericExtreme(max bool, operands []driver.Value) (driver.Value, bool) {
+	best, ok := asFloat64(operands[0])
+	if !ok {
+		return nil, false
+	}
+	for i := 1; i < len(operands); i++ {
+		v, ok := asFloat64(operands[i])
 		if !ok {
-			return args[0], nil
+			return nil, false
 		}
-		for i := 1; i < len(args); i++ {
-			v, ok := asFloat64(args[i])
-			if !ok {
-				continue
-			}
-			if max {
-				if v > best {
-					best = v
-				}
-			} else if v < best {
-				best = v
-			}
+		if max == (v > best) && v != best {
+			best = v
 		}
-		// Prefer integer when all inputs were integers.
-		if best == math.Trunc(best) {
-			return int64(best), nil
+	}
+	// Prefer integer when all inputs were integers.
+	if best == math.Trunc(best) {
+		return int64(best), true
+	}
+	return best, true
+}
+
+// comparableExtreme 处理时间戳与字符串：能解析成时间的按时间序比较，
+// 否则退化为字典序。返回的是原始操作数，保持列的存储形态不变。
+func comparableExtreme(max bool, operands []driver.Value) driver.Value {
+	bestIdx := 0
+	bestTime, bestIsTime := parseSQLiteTime(operands[0])
+	for i := 1; i < len(operands); i++ {
+		candTime, candIsTime := parseSQLiteTime(operands[i])
+		var newer bool
+		switch {
+		case bestIsTime && candIsTime:
+			newer = candTime.After(bestTime)
+		case bestIsTime != candIsTime:
+			// 类型不可比时保持既有选择，不做猜测。
+			continue
+		default:
+			newer = driverValueString(operands[i]) > driverValueString(operands[bestIdx])
 		}
-		return best, nil
+		if newer == max {
+			bestIdx, bestTime, bestIsTime = i, candTime, candIsTime
+		}
+	}
+	return operands[bestIdx]
+}
+
+func driverValueString(v driver.Value) string {
+	switch s := v.(type) {
+	case string:
+		return s
+	case []byte:
+		return string(s)
+	default:
+		return fmt.Sprint(v)
 	}
 }
 
