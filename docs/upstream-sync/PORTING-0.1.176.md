@@ -1,6 +1,6 @@
 # 移植清单：上游 v0.1.176
 
-对照日期：2026-08-15（当日复核：上游已发 [`v0.1.177`](https://github.com/Wei-Shaw/sub2api/releases/tag/v0.1.177)，见第 9 节）。  
+对照日期：2026-08-15（当日复核：上游已发 [`v0.1.177`](https://github.com/Wei-Shaw/sub2api/releases/tag/v0.1.177)，见第 9 节）。2026-08-16 逐项复核：全部「已合」项经代码与测试核实属实。  
 合完一项就把状态改成「已合」。P0–P3 与第 8 节小 bugfix 全部已合。
 
 通用流程见 [README.md](./README.md)。
@@ -17,7 +17,7 @@
 | `main` 比 `v0.1.173` | 124 commits / 244 files |
 | `v0.1.176` 比 `v0.1.173` | 107 commits |
 | `v0.1.177` 比 `v0.1.176` | 18 commits（即原第 9 节所列 main 提交 + VERSION bump） |
-| `main` 比 `v0.1.177` | 0 commits（截至 2026-08-15，仅 VERSION sync 已含在 tag 内） |
+| `main` 比 `v0.1.177` | 1 commit（2026-08-16 实测 ahead_by=1：`baeac1f3` 仅 sync VERSION，打 tag 后 16 秒才落 main、不在 tag 内；无代码可合） |
 | 本仓库版本号 | `backend/cmd/server/VERSION` = `1.1.0`（自有编号，不要改成 0.1.176） |
 
 对比链接：
@@ -173,6 +173,15 @@ cd ../frontend && pnpm run typecheck && pnpm run lint:check
 
 已知预存在失败（HEAD 上同样红，与本次无关）：`migrations` 包全部（断言 PG 语法）、
 `TestAPIContracts/GET_/api/v1/admin/settings*`、OpenAI OAuth originator 系列。
+2026-08-16 全量复核补充（在 `216fc41` 上验证同样失败）：
+`TestOpenAIGatewayService_OAuthPassthrough_{CodexTuiIdentityUnified,OfficialIdentityUnified,StreamKeepsToolNameAndBodyNormalized}`。
+`internal/repository` 此前整包编译失败（`usage_log_session_id_unit_test.go` 引用已被 `25646e6` 删除的
+`usageLogInsertArgTypes`），2026-08-16 已修复，并连带清完被它掩盖的 9 个旧测试失败——逐个甄别均为
+「测试仍锚定 PG 行为、生产已按设计 SQLite 化」，无真实回归：proxy 身份 SELECT 去掉 `FOR NO KEY UPDATE`、
+探测失效改 `json_remove`/`json_type`（事务与回滚语义仍由测试验证）；monitor 模板 headers 合并改
+`json_patch`/`json_set`（行数守卫与回滚消息不变）；DB 池对 SQLite 单写者恒 clamp（≤0 或 >8 → 4，idle 封顶到 open）；
+OAuth 候选页 `LIMIT ?`；审核计数 `NOT $3`。生产侧仅动 `error_translate.go`：typed-nil 守卫 +
+`SQLState()=="23505"` 接口判定（不引 lib/pq，过 sqlite 方言审计）。该包现全绿。
 
 ---
 
@@ -184,16 +193,19 @@ cd ../frontend && pnpm run typecheck && pnpm run lint:check
 
 | 文件 | 动作 | 改什么 |
 |------|------|--------|
-| `backend/internal/handler/openai_x_search.go` | 新建 | `XSearch` 只 set `grok_x_search_endpoint` 再调 `WebSearch`；请求体 + `buildGrokXSearchResponsesBody` |
+| `backend/internal/handler/openai_x_search.go` | 新建 | `XSearch` 只 set `grok_x_search_endpoint` 再调 `WebSearch`；请求体 + `buildGrokXSearchResponsesBody`（`x_search` tool 与 `include: x_search_call.action.sources` 字面量在此 builder 里） |
 | `backend/internal/handler/openai_x_search_test.go` | 新建 | 工具字段、`input` 别名、运行时默认模型 |
-| `backend/internal/handler/gateway_web_search.go` | 改 | 读该 flag，走 `x_search` tool + `include: x_search_call.action.sources`；模型改用运行时默认；`x_search_call` 也抽 sources |
+| `backend/internal/handler/gateway_web_search.go` | 改 | 读该 flag 分流 `doGrokNativeXSearch`（调用上行 builder）；模型改用运行时默认；`x_search_call` 也抽 sources；用量模型标签改为动态 `grok-`+label（/x_search 落 `grok-x-search`；搜索按分组 search_price_per_1k 计费，与标签解耦） |
 | `backend/internal/server/routes/gateway.go` | 改 | 分组路由 + 根路由各加 `POST /x_search`，仅 Grok |
 | `backend/internal/server/routes/prompt_audit_route_coverage_test.go` | 改 | `/x_search` 归到 `gateway_web_search.go`（审计在那里做） |
 | `backend/internal/pkg/apicompat/types.go` | 改 | `ResponsesTool` / `ChatTool` 加 x_search 过滤字段 |
 | `backend/internal/pkg/apicompat/chatcompletions_to_responses.go` | 改 | Chat → Responses 保留 x_search |
 | `backend/internal/pkg/apicompat/chatcompletions_responses_bridge.go` | 改 | Responses → Chat 保留 x_search + tool_choice |
-| `backend/internal/pkg/apicompat/chatcompletions_x_search_test.go` | 新建 | 往返 + tool_choice 字符串形式 |
+| `backend/internal/pkg/apicompat/chatcompletions_x_search_test.go` | 新建 | Chat→Responses 与 Responses→Chat 两个单向用例 + tool_choice 字符串形式 |
+| `backend/internal/handler/openai_gateway_handler.go` | 核过 | 本次未改；composite grok `/v1/messages` 修复无回退（仍走 `isOpenAIResponsesCompatibleGatewayPlatform` 分支） |
 | `backend/internal/service/openai_gateway_grok*.go` | 跳过 | 核对 #5571 后确认这三个文件没有 x_search 改动（文档原先的猜测不成立） |
+
+补记（2026-08-16 核查）：`/web_search` 与 `/x_search` 共用 `grokStandaloneSearchRequest` 绑定，普通 `/web_search` 会解析并静默忽略 `allowed_x_handles` / `from_date` 等 x_search 专有字段，无害。
 
 ---
 
@@ -202,7 +214,7 @@ cd ../frontend && pnpm run typecheck && pnpm run lint:check
 | PR | 文件 | 说明 | 状态 |
 |----|------|------|------|
 | [#5540](https://github.com/Wei-Shaw/sub2api/pull/5540) | `channel_service.go` + test | 定价冲突检测改用 `normalizeChannelPricingModelName`，和缓存键同一套归一化；映射侧保持 ToLower | 已合 |
-| [#5543](https://github.com/Wei-Shaw/sub2api/pull/5543) | `admin_group.go`、`admin_service.go`、`channel_service.go`、`wire.go` + test | 分组改平台后失效渠道缓存；`ChannelCacheInvalidator` 窄接口，`wire_gen.go` 用 generate | 已合 |
+| [#5543](https://github.com/Wei-Shaw/sub2api/pull/5543) | `admin_group.go`、`admin_service.go`、`channel_service.go`、`wire.go`、`api_contract_test.go`（1 行） + test | 分组改平台后失效渠道缓存；`ChannelCacheInvalidator` 窄接口，`wire_gen.go` 用 generate | 已合 |
 | [#5504](https://github.com/Wei-Shaw/sub2api/pull/5504) | `openai_apikey_responses_probe.go` + 新 test | 探测判据不成立（`incomplete/max_output_tokens`、`failed`）时保持 unknown；落标不支持时 warn | 已合 |
 
 ---
@@ -215,13 +227,13 @@ cd ../frontend && pnpm run typecheck && pnpm run lint:check
 |------|---------------|------------|
 | Grok 长上下文只跟分组开关，不被 OpenAI 账号开关否决 | `fd82dfd5`（#5573） | **已合**（随 P2 一起带） |
 | 未知 Grok 文本兜底排除 image/video/audio | `e29b93a1`（#5573） | **已合**（随 P0 一起带） |
-| relay `x-codex-turn-state`、防跨账号 echo | `8219dcfc` + 测试补丁 `4d9fedee`（#5668） | **已合**（2026-08-15）：`openai_codex_turn_state.go` + 响应侧 relay（流式 / 非流式 / SSE→JSON / 透传写头）+ 出站守卫。测试取 `8219dcfc` 版本并剔掉属于下一项的 beta 头用例 |
-| session-level beta features + 探测 native compaction v2 | `8ae6d8f6`（#5668） | **已合**（2026-08-15）：探测改打流式 `/responses` + `compaction_trigger`，2xx 无 compaction item 记为不支持；`x-codex-beta-features` 在 HTTP / 透传 / WS 三处按会话级补注；`compactProbeSessionID` 改 UUID 派生 |
-| Codex fingerprint 改成 **opt-in，默认 off**，并覆盖透传 | `fce41e31`（#5668） | **已合**（2026-08-15）：`openai_codex_fingerprint.go` 取 v0.1.177 最终版；Forward / 透传两条路径共享同一份收敛 ID；只合指纹，同提交里的 turn-state 与 beta 头留给下一项 |
+| relay `x-codex-turn-state`、防跨账号 echo | `8219dcfc` + 测试补丁 `4d9fedee`（#5668） | **已合**（2026-08-15）：`openai_codex_turn_state.go` + 响应侧 relay（流式 / 非流式 / SSE→JSON / 透传写头）+ 出站守卫。测试取 `8219dcfc` 版本并剔掉属于下一项的 beta 头用例（该三个用例已随 `ea48805` 补回） |
+| session-level beta features + 探测 native compaction v2 | `8ae6d8f6`（#5668） | **已合**（2026-08-15）：探测改打流式 `/responses` + `compaction_trigger`，2xx 无 compaction item 记为不支持；`x-codex-beta-features` 在 HTTP / 透传 / WS 三处按会话级补注（探测路径另有第四处窄补注 `ensureOpenAIRemoteCompactionV2BetaFeature`，且 OAuth 探测套用指纹收敛头，为本 fork 相对上游的增量）；`compactProbeSessionID` 改 SHA-256 确定性派生（UUIDv4 形状，账号级稳定） |
+| Codex fingerprint 改成 **opt-in，默认 off**，并覆盖透传 | `fce41e31`（#5668） | **已合**（2026-08-15）：`openai_codex_fingerprint.go` 取 v0.1.177 最终版；Forward / 透传各自解析、各路径内 body 与出站头共享同一份收敛 ID；只合指纹，同提交里的 turn-state 与 beta 头留给下一项 |
 | 保留 remote compaction v2、native/legacy 分流 | `9662cff2` / `a8b9ea22`（#5641） | **大部分已有，暂缓**。本地 `normalizeOpenAIResponsesCompactRequest` 已让 native v2 保持裸 `/responses` 直通（9662cff2 的核心）；缺的只有 `openai_compaction_context.go`（渠道限制按 forward model 判定的窄修复）。合 `8ae6d8f6` 时若冲突再顺手带 |
 | 分组用量日聚合 + 时区 | `cb7b0379` 等（#5649） | **不合**：本 fork 刚藏过用量筛选/图表，且聚合 SQL 面向 PG |
 | 账号页自动刷新偏好改为模块初始化时恢复 | `e215c98c`（#5573） | 可跳过：28 行前端小改，本 fork AccountsView 已简化，收益低 |
-| CI 里 Go **1.26.6** | 见 #5649 相关 CI 修复 | 低优先级 chore。本地 go.mod + 4 个 workflow 仍写死 `1.26.5`，升则一起改 |
+| CI 里 Go **1.26.6** | 见 #5649 相关 CI 修复 | 低优先级 chore。本地 go.mod + 3 个 workflow 文件里 4 处断言（backend-ci ×2、security-scan、release）仍写死 `1.26.5`，升则一起改 |
 
 推荐合入顺序：① fingerprint（已合）→ ② turn-state relay + echo 守卫（已合）→ ③ compact 探测 v2 + beta 头（已合）。三者都在 #5668 内，文件互不重叠但语义相关。
 
