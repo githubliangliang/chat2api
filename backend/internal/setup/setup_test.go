@@ -1,11 +1,17 @@
 package setup
 
 import (
+	"context"
+	"database/sql"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/repository"
 
 	"gopkg.in/yaml.v3"
 )
@@ -185,6 +191,82 @@ func TestSetupMigrationTimeout(t *testing.T) {
 			t.Fatalf("migrationTimeout()=%s, want 300s", got)
 		}
 	})
+}
+
+func TestInitializeSQLiteSchemaSupportsStartupMigrations(t *testing.T) {
+	databasePath := filepath.Join(t.TempDir(), "sub2api.db")
+	cfg := &SetupConfig{
+		Database: DatabaseConfig{
+			Driver: "sqlite",
+			Path:   databasePath,
+		},
+	}
+
+	if err := initializeSQLiteSchema(cfg); err != nil {
+		t.Fatalf("initializeSQLiteSchema() error = %v", err)
+	}
+
+	db, err := sql.Open("sqlite", buildSQLiteDSN(&cfg.Database))
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	db.SetMaxOpenConns(1)
+
+	if err := repository.ApplyMigrations(context.Background(), db); err != nil {
+		t.Fatalf("startup ApplyMigrations() error = %v", err)
+	}
+
+	var supportedModelScopes string
+	var messagesDispatchModelConfig string
+	var modelsListConfig string
+	var reasoningEffortMappings string
+	err = db.QueryRow(`
+		SELECT supported_model_scopes,
+		       messages_dispatch_model_config,
+		       models_list_config,
+		       reasoning_effort_mappings
+		FROM groups
+		WHERE name = 'default'
+	`).Scan(
+		&supportedModelScopes,
+		&messagesDispatchModelConfig,
+		&modelsListConfig,
+		&reasoningEffortMappings,
+	)
+	if err != nil {
+		t.Fatalf("query default group error = %v", err)
+	}
+
+	var scopes []string
+	if err := json.Unmarshal([]byte(supportedModelScopes), &scopes); err != nil {
+		t.Fatalf("supported_model_scopes is invalid JSON: %v", err)
+	}
+	wantScopes := []string{"claude", "gemini_text", "gemini_image"}
+	if !reflect.DeepEqual(scopes, wantScopes) {
+		t.Fatalf("supported_model_scopes = %#v, want %#v", scopes, wantScopes)
+	}
+
+	for name, value := range map[string]string{
+		"messages_dispatch_model_config": messagesDispatchModelConfig,
+		"models_list_config":             modelsListConfig,
+	} {
+		var object map[string]any
+		if err := json.Unmarshal([]byte(value), &object); err != nil {
+			t.Fatalf("%s is invalid JSON: %v", name, err)
+		}
+		if len(object) != 0 {
+			t.Fatalf("%s = %#v, want empty object", name, object)
+		}
+	}
+
+	var mappings []any
+	if err := json.Unmarshal([]byte(reasoningEffortMappings), &mappings); err != nil {
+		t.Fatalf("reasoning_effort_mappings is invalid JSON: %v", err)
+	}
+	if len(mappings) != 0 {
+		t.Fatalf("reasoning_effort_mappings = %#v, want empty array", mappings)
+	}
 }
 
 func TestWriteConfigFileKeepsDefaultUserConcurrency(t *testing.T) {

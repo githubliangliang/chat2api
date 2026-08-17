@@ -13,14 +13,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/repository"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
-	"entgo.io/ent/dialect"
-	entsql "entgo.io/ent/dialect/sql"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
@@ -345,7 +342,7 @@ func initializeDatabase(cfg *SetupConfig) error {
 	return initializeSQLiteSchema(cfg)
 }
 
-// initializeSQLiteSchema creates tables via Ent Schema.Create (PG SQL migrations are not used).
+// initializeSQLiteSchema creates tables through the same migrations used at startup.
 func initializeSQLiteSchema(cfg *SetupConfig) error {
 	path := cfg.Database.SQLitePath()
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
@@ -359,19 +356,16 @@ func initializeSQLiteSchema(cfg *SetupConfig) error {
 		return fmt.Errorf("open sqlite: %w", err)
 	}
 	db.SetMaxOpenConns(1)
-
-	drv := entsql.OpenDB(dialect.SQLite, db)
-	client := ent.NewClient(ent.Driver(drv))
 	defer func() {
-		if err := client.Close(); err != nil {
-			logger.LegacyPrintf("setup", "failed to close sqlite ent client: %v", err)
+		if err := db.Close(); err != nil {
+			logger.LegacyPrintf("setup", "failed to close sqlite database: %v", err)
 		}
 	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.migrationTimeout())
 	defer cancel()
-	if err := client.Schema.Create(ctx); err != nil {
-		return fmt.Errorf("sqlite schema create: %w", err)
+	if err := repository.ApplyMigrations(ctx, db); err != nil {
+		return fmt.Errorf("sqlite migrations: %w", err)
 	}
 	if err := repository.EnsureSQLiteAuxTables(ctx, db); err != nil {
 		return fmt.Errorf("sqlite aux tables: %w", err)
