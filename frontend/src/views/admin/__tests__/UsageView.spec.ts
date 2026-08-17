@@ -29,7 +29,9 @@ const { list, exportList, getStats, getById, getModelStats, listErrorLogs, route
 const messages: Record<string, string> = {
   'admin.dashboard.timeRange': 'Time Range',
   'admin.usage.failedToLoadUser': 'Failed to load user',
+  'admin.usage.user': 'User',
   'admin.usage.requestId': 'Request ID',
+  'admin.ops.errorLog.user': 'User',
   'usage.requestedModel': 'Requested model',
   'usage.sentUpstreamModel': 'Sent upstream model',
   'usage.upstreamResponseModel': 'Upstream response model',
@@ -126,6 +128,10 @@ const UsageTableStub = {
   props: ['columns'],
   emits: ['userClick'],
   template: '<div data-test="usage-table"><button class="user-click" @click="$emit(\'userClick\', 2)">user</button></div>',
+}
+const OpsErrorLogTableStub = {
+  props: ['visibleColumnKeys'],
+  template: '<div data-test="error-table" />',
 }
 const UserTokenRankingStub = {
   emits: ['select-user'],
@@ -282,6 +288,77 @@ describe('admin UsageView request ID column visibility', () => {
     expect(localStorage.setItem).toHaveBeenCalledWith(
       'usage-hidden-columns-version',
       'request-id-hidden-by-default',
+    )
+  })
+})
+
+describe('admin UsageView user column visibility', () => {
+  beforeEach(() => {
+    vi.mocked(localStorage.getItem).mockReset().mockReturnValue(null)
+    vi.mocked(localStorage.setItem).mockReset()
+    list.mockReset().mockResolvedValue({ items: [], total: 0, pages: 0 })
+    getStats.mockReset().mockResolvedValue(emptyStats)
+    getModelStats.mockReset().mockResolvedValue({ models: [] })
+  })
+
+  it('shows the usage user column by default and allows hiding it from column settings', async () => {
+    const wrapper = mount(UsageView, {
+      global: {
+        stubs: {
+          ...defaultStubs,
+          UsageTable: UsageTableStub,
+        },
+      },
+    })
+    await wrapper.vm.$nextTick()
+
+    const usageTable = wrapper.findComponent(UsageTableStub)
+    expect(usageTable.props('columns')).toEqual(
+      expect.arrayContaining([expect.objectContaining({ key: 'user', label: 'User' })]),
+    )
+
+    await wrapper.get('button[title="admin.users.columnSettings"]').trigger('click')
+    const userToggle = wrapper.findAll('button').find((button) => button.text() === 'User')
+    expect(userToggle).toBeDefined()
+    await userToggle!.trigger('click')
+
+    expect(usageTable.props('columns')).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ key: 'user' })]),
+    )
+    expect(localStorage.setItem).toHaveBeenCalledWith(
+      'usage-hidden-columns',
+      JSON.stringify(['reasoning_effort', 'request_id', 'user_agent', 'user']),
+    )
+  })
+
+  it('shows the error user column by default and allows hiding it from column settings', async () => {
+    listErrorLogs.mockReset().mockResolvedValue({ items: [], total: 0, pages: 0 })
+    const wrapper = mount(UsageView, {
+      global: {
+        stubs: {
+          ...defaultStubs,
+          OpsErrorLogTable: OpsErrorLogTableStub,
+          OpsErrorDetailModal: true,
+        },
+      },
+    })
+    await flushPromises()
+
+    await wrapper.findAll('[data-testid="usage-detail-tab"]')[1].trigger('click')
+    await flushPromises()
+
+    const errorTable = wrapper.findComponent(OpsErrorLogTableStub)
+    expect(errorTable.props('visibleColumnKeys')).toContain('user')
+
+    await wrapper.get('button[title="admin.users.columnSettings"]').trigger('click')
+    const userToggle = wrapper.findAll('button').find((button) => button.text() === 'User')
+    expect(userToggle).toBeDefined()
+    await userToggle!.trigger('click')
+
+    expect(errorTable.props('visibleColumnKeys')).not.toContain('user')
+    expect(localStorage.setItem).toHaveBeenCalledWith(
+      'usage-error-hidden-columns',
+      JSON.stringify(['user_agent', 'user']),
     )
   })
 })
