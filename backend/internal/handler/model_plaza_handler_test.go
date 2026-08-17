@@ -50,6 +50,47 @@ func TestFilterPlazaVisibleGroups_AuthedEmptySetSeesNoExclusive(t *testing.T) {
 	require.Len(t, visible, 2)
 }
 
+func TestPlazaAccessAllowed(t *testing.T) {
+	t.Parallel()
+
+	disabled := service.ModelPlazaRuntime{Enabled: false, RequireAuth: false}
+	enabled := service.ModelPlazaRuntime{Enabled: true, RequireAuth: false}
+	requireAuth := service.ModelPlazaRuntime{Enabled: true, RequireAuth: true}
+	disabledRequireAuth := service.ModelPlazaRuntime{Enabled: false, RequireAuth: true}
+
+	allowed, needAuth := plazaAccessAllowed(disabled, false, false)
+	require.False(t, allowed)
+	require.False(t, needAuth)
+
+	allowed, needAuth = plazaAccessAllowed(disabled, true, false)
+	require.False(t, allowed)
+	require.False(t, needAuth)
+
+	allowed, needAuth = plazaAccessAllowed(disabled, true, true)
+	require.True(t, allowed)
+	require.False(t, needAuth)
+
+	allowed, needAuth = plazaAccessAllowed(disabledRequireAuth, false, false)
+	require.False(t, allowed)
+	require.False(t, needAuth, "disabled switch must 404 before require-auth")
+
+	allowed, needAuth = plazaAccessAllowed(enabled, false, false)
+	require.True(t, allowed)
+	require.False(t, needAuth)
+
+	allowed, needAuth = plazaAccessAllowed(requireAuth, false, false)
+	require.False(t, allowed)
+	require.True(t, needAuth)
+
+	allowed, needAuth = plazaAccessAllowed(requireAuth, true, false)
+	require.True(t, allowed)
+	require.False(t, needAuth)
+
+	allowed, needAuth = plazaAccessAllowed(requireAuth, true, true)
+	require.True(t, allowed)
+	require.False(t, needAuth)
+}
+
 func TestModelPlazaHandler_NilSettingServiceFailsClosed404(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	h := &ModelPlazaHandler{} // settingService == nil → fail-closed

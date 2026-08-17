@@ -79,6 +79,27 @@ type modelPlazaResponse struct {
 	Groups      []modelPlazaGroup `json:"groups"`
 }
 
+// plazaAccessAllowed 判定公开广场接口是否放行。
+// 管理员走菜单管理进后台页时，即使 model_plaza_enabled 关闭也要能读数据；
+// 匿名 / 普通用户仍 fail-closed：关开关 404，require_auth 未登录 401。
+func plazaAccessAllowed(rt service.ModelPlazaRuntime, authed, isAdmin bool) (allowed bool, needAuth bool) {
+	if authed && isAdmin {
+		return true, false
+	}
+	if !rt.Enabled {
+		return false, false
+	}
+	if rt.RequireAuth && !authed {
+		return false, true
+	}
+	return true, false
+}
+
+func isAdminFromContext(c *gin.Context) bool {
+	role, ok := middleware.GetUserRoleFromContext(c)
+	return ok && role == service.RoleAdmin
+}
+
 // Get 返回模型广场数据。
 // GET /api/v1/model-plaza
 func (h *ModelPlazaHandler) Get(c *gin.Context) {
@@ -87,14 +108,14 @@ func (h *ModelPlazaHandler) Get(c *gin.Context) {
 		return
 	}
 	rt := h.settingService.GetModelPlazaRuntime(c.Request.Context())
-	if !rt.Enabled {
-		response.NotFound(c, "Model plaza is not enabled")
+	subject, authed := middleware.GetAuthSubjectFromContext(c)
+	allowed, needAuth := plazaAccessAllowed(rt, authed, isAdminFromContext(c))
+	if needAuth {
+		response.Unauthorized(c, "Authentication required")
 		return
 	}
-
-	subject, authed := middleware.GetAuthSubjectFromContext(c)
-	if rt.RequireAuth && !authed {
-		response.Unauthorized(c, "Authentication required")
+	if !allowed {
+		response.NotFound(c, "Model plaza is not enabled")
 		return
 	}
 

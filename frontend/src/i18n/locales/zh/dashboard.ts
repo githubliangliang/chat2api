@@ -564,6 +564,8 @@ export default {
       noPricing: '未配置定价',
       peakNote: '高峰时段 {window} 计费倍率 ×{multiplier}'
     },
+    copyModelId: '复制模型 ID',
+    modelIdCopied: '模型 ID 已复制',
     table: {
       model: '模型',
       input: '输入',

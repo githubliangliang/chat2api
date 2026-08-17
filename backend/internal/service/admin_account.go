@@ -46,6 +46,13 @@ func (s *adminServiceImpl) ListOpenAISchedulableAccountsForSchedulerScore(ctx co
 	return s.accountRepo.ListSchedulableUngroupedByPlatform(ctx, PlatformOpenAI)
 }
 
+func (s *adminServiceImpl) ListActiveAccounts(ctx context.Context) ([]Account, error) {
+	if s == nil || s.accountRepo == nil {
+		return nil, nil
+	}
+	return s.accountRepo.ListActive(ctx)
+}
+
 func (s *adminServiceImpl) GetAccount(ctx context.Context, id int64) (*Account, error) {
 	return s.accountRepo.GetByID(ctx, id)
 }

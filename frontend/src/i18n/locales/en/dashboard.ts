@@ -559,6 +559,8 @@ export default {
       noPricing: 'Pricing not configured',
       peakNote: 'Peak hours {window}: billing rate ×{multiplier}'
     },
+    copyModelId: 'Copy model ID',
+    modelIdCopied: 'Model ID copied',
     table: {
       model: 'Model',
       input: 'Input',

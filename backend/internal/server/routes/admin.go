@@ -46,6 +46,9 @@ func RegisterAdminRoutes(
 		// 账号管理
 		registerAccountRoutes(admin, h, stepUpAuth)
 
+		// 启用账号模型汇总（侧栏「模型广场」）
+		admin.GET("/model-plaza", h.Admin.Account.ListAccountModelPlaza)
+
 		// OpenAI OAuth
 		registerOpenAIOAuthRoutes(admin, h)
 

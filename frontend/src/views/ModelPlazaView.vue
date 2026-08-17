@@ -27,8 +27,11 @@ const route = useRoute()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 
+// 后台菜单走 /admin/model-plaza；顶栏入口仍用 ?embedded=1。
 // embedded=1 但未登录(如转发的链接)自动降级为独立形态。
-const isEmbedded = computed(() => route.query.embedded === '1' && authStore.isAuthenticated)
+const isEmbedded = computed(
+  () => route.path === '/admin/model-plaza' || (route.query.embedded === '1' && authStore.isAuthenticated)
+)
 
 const data = ref<ModelPlazaResponse | null>(null)
 const loading = ref(true)

@@ -2747,6 +2747,19 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 	response.Success(c, models)
 }
 
+// ListAccountModelPlaza aggregates client-facing model IDs from enabled
+// (status=active) accounts. GET /api/v1/admin/model-plaza
+func (h *AccountHandler) ListAccountModelPlaza(c *gin.Context) {
+	accounts, err := h.adminService.ListActiveAccounts(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{
+		"items": service.AggregateAccountModelPlaza(accounts),
+	})
+}
+
 // SyncUpstreamModels handles syncing live supported models from an account's upstream.
 // POST /api/v1/admin/accounts/:id/models/sync-upstream
 func (h *AccountHandler) SyncUpstreamModels(c *gin.Context) {

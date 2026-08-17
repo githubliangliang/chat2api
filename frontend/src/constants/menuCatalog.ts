@@ -34,6 +34,7 @@ export const ADMIN_BUILTIN_MENUS: BuiltinMenuEntry[] = [
   { path: '/admin/channels/monitor', labelKey: 'nav.channelMonitor', scope: 'admin' },
   { path: '/admin/subscriptions', labelKey: 'nav.subscriptions', scope: 'admin' },
   { path: '/admin/accounts', labelKey: 'nav.accounts', scope: 'admin' },
+  { path: '/admin/model-plaza', labelKey: 'nav.modelPlaza', scope: 'admin' },
   { path: '/admin/proxies', labelKey: 'nav.proxies', scope: 'admin' },
   { path: '/admin/risk-control', labelKey: 'nav.contentModeration', scope: 'admin' },
   { path: '/admin/prompt-audit', labelKey: 'nav.promptAudit', scope: 'admin' },

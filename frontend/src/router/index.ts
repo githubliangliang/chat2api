@@ -371,6 +371,18 @@ const routes: RouteRecordRaw[] = [
       descriptionKey: 'admin.accounts.description'
     }
   },
+  {
+    path: '/admin/model-plaza',
+    name: 'AdminModelPlaza',
+    component: () => import('@/views/admin/ModelPlazaView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Model Plaza',
+      titleKey: 'admin.modelPlaza.title',
+      descriptionKey: 'admin.modelPlaza.description'
+    }
+  },
     {
     path: '/admin/proxies',
     name: 'AdminProxies',
@@ -584,8 +596,13 @@ router.beforeEach(async (to, _from, next) => {
         }
       }
       const plazaSettings = appStore.cachedPublicSettings
-      // 仅在设置成功加载且明确为 false 时拦截(瞬时加载失败视为未知,由后端 404 兜底)
-      if (appStore.publicSettingsLoaded && plazaSettings?.model_plaza_enabled === false) {
+      // 仅在设置成功加载且明确为 false 时拦截(瞬时加载失败视为未知,由后端 404 兜底)。
+      // 管理员侧栏/菜单管理不跟公开开关走，关了也能进。
+      if (
+        appStore.publicSettingsLoaded &&
+        plazaSettings?.model_plaza_enabled === false &&
+        !authStore.isAdmin
+      ) {
         next(authStore.isAuthenticated ? currentSignedInHomePath() : '/home')
         return
       }

@@ -57,6 +57,16 @@ describe('AppSidebar dashboard menu visibility', () => {
     expect(simpleBlock).toContain("path: '/dashboard'")
     expect(simpleBlock).toContain("path: '/keys'")
   })
+
+  it('lists model plaza after accounts without tying it to the public feature flag', () => {
+    const accountsIdx = componentSource.indexOf("{ path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon }")
+    const plazaIdx = componentSource.indexOf("{ path: '/admin/model-plaza', label: t('nav.modelPlaza'), icon: DashboardIcon }")
+    expect(accountsIdx).toBeGreaterThan(-1)
+    expect(plazaIdx).toBeGreaterThan(accountsIdx)
+    const plazaLine = componentSource.slice(plazaIdx, componentSource.indexOf('\n', plazaIdx))
+    expect(plazaLine).not.toContain('featureFlag')
+    expect(plazaLine).not.toContain('hideInSimpleMode')
+  })
 })
 
 describe('AppSidebar header styles', () => {

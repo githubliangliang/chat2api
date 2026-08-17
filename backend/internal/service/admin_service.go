@@ -76,6 +76,10 @@ type AdminService interface {
 	// ListOpenAISchedulableAccountsForSchedulerScore 返回指定分组（nil 为未分组）内
 	// 可调度的 OpenAI 账号，用于按组计算调度分数。
 	ListOpenAISchedulableAccountsForSchedulerScore(ctx context.Context, groupID *int64) ([]Account, error)
+	// ListActiveAccounts returns every account whose status is active.
+	// It does not require schedulable / not-rate-limited; that is the
+	// "enabled" set used by the admin model plaza.
+	ListActiveAccounts(ctx context.Context) ([]Account, error)
 	GetAccount(ctx context.Context, id int64) (*Account, error)
 	GetAccountsByIDs(ctx context.Context, ids []int64) ([]*Account, error)
 	CreateAccount(ctx context.Context, input *CreateAccountInput) (*Account, error)

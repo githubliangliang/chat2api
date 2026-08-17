@@ -3,6 +3,14 @@ import { mount } from '@vue/test-utils'
 import PlazaModelPricingTable from '../PlazaModelPricingTable.vue'
 import type { PlazaModel } from '@/api/modelPlaza'
 
+const { copyToClipboard } = vi.hoisted(() => ({
+  copyToClipboard: vi.fn()
+}))
+
+vi.mock('@/composables/useClipboard', () => ({
+  useClipboard: () => ({ copyToClipboard })
+}))
+
 vi.mock('vue-i18n', async () => {
   const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
   return {
@@ -403,5 +411,14 @@ describe('PlazaModelPricingTable', () => {
     ])
     expect(wrapper.text()).toContain('Anthropic')
     expect(wrapper.text()).toContain('OpenAI')
+  })
+
+  it('点击模型名复制客户端模型 ID', async () => {
+    copyToClipboard.mockReset()
+    const wrapper = mountTable([tokenModel({ name: 'claude-sonnet-4' })], 1)
+    const button = wrapper.get('button[title="modelPlaza.copyModelId"]')
+    expect(button.text()).toContain('claude-sonnet-4')
+    await button.trigger('click')
+    expect(copyToClipboard).toHaveBeenCalledWith('claude-sonnet-4', 'modelPlaza.modelIdCopied')
   })
 })

@@ -436,6 +436,16 @@ func (s *stubAdminService) ListAccountsForSchedulerScoreFilter(_ context.Context
 	return s.accounts, nil
 }
 
+func (s *stubAdminService) ListActiveAccounts(_ context.Context) ([]service.Account, error) {
+	out := make([]service.Account, 0, len(s.accounts))
+	for _, account := range s.accounts {
+		if account.Status == service.StatusActive {
+			out = append(out, account)
+		}
+	}
+	return out, nil
+}
+
 func (s *stubAdminService) ListOpenAISchedulableAccountsForSchedulerScore(_ context.Context, groupID *int64) ([]service.Account, error) {
 	s.openAISchedulerScorePoolCalls++
 	accounts := s.openAISchedulerScorePoolAccounts

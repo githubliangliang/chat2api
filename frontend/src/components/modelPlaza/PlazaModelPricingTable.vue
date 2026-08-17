@@ -65,7 +65,19 @@
           <!-- 模型名 + 非 token 计费模式徽章 -->
           <td class="border-r border-gray-100 py-2.5 pl-5 pr-4 align-middle dark:border-dark-700/60">
             <div class="flex flex-wrap items-center gap-1.5">
-              <span class="font-medium text-gray-900 dark:text-white">{{ m.name }}</span>
+              <button
+                type="button"
+                class="group/copy inline-flex max-w-full items-center gap-1 rounded-md text-left font-medium text-gray-900 transition-colors hover:text-primary-600 dark:text-white dark:hover:text-primary-400"
+                :title="t('modelPlaza.copyModelId')"
+                @click="copyModelId(m.name)"
+              >
+                <span class="truncate">{{ m.name }}</span>
+                <Icon
+                  name="clipboard"
+                  size="xs"
+                  class="h-3.5 w-3.5 shrink-0 text-gray-400 opacity-0 transition-opacity group-hover/copy:opacity-100 group-focus-visible/copy:opacity-100 dark:text-dark-400"
+                />
+              </button>
               <span
                 v-if="platform && m.platform !== platform"
                 :class="[
@@ -211,6 +223,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import Icon from '@/components/icons/Icon.vue'
+import { useClipboard } from '@/composables/useClipboard'
 import { formatScaled } from '@/utils/pricing'
 import { platformAccentColor, platformBadgeLightClass, platformLabel } from '@/utils/platformColors'
 import {
@@ -235,6 +249,11 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
+const { copyToClipboard } = useClipboard()
+
+function copyModelId(id: string) {
+  void copyToClipboard(id, t('modelPlaza.modelIdCopied'))
+}
 
 /** 实付分区只从平台拿一个主色,浅底/标题/下划线全部由 scoped CSS 用 color-mix 派生。 */
 const accentStyle = computed(() => ({ '--plaza-accent': platformAccentColor(props.platform ?? '') }))
