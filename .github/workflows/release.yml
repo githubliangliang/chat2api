@@ -27,35 +27,29 @@ permissions:
   packages: write
 
 jobs:
-  # Update VERSION file with tag version
-  update-version:
+  preflight:
     runs-on: ubuntu-latest
+    outputs:
+      release_sha: ${{ steps.resolve-tag.outputs.release_sha }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+          ref: ${{ github.event.repository.default_branch }}
 
-      - name: Update VERSION file
-        run: |
-          VERSION=${RELEASE_TAG#v}
-          echo "$VERSION" > backend/cmd/server/VERSION
-          echo "Updated VERSION file to: $VERSION"
-
-      - name: Upload VERSION artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: version-file
-          path: backend/cmd/server/VERSION
-          retention-days: 1
+      - name: Resolve release tag
+        id: resolve-tag
+        run: "$GITHUB_WORKSPACE/deploy/resolve-release-tag.sh"
 
   build-frontend:
+    needs: [preflight]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ needs.preflight.outputs.release_sha }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
@@ -85,12 +79,13 @@ jobs:
           retention-days: 1
 
   verify-backend:
+    needs: [preflight]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ needs.preflight.outputs.release_sha }}
 
       - name: Setup Go
         uses: actions/setup-go@v6
@@ -112,20 +107,14 @@ jobs:
         run: make test-integration
 
   release:
-    needs: [update-version, build-frontend, verify-backend]
+    needs: [preflight, build-frontend, verify-backend]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
-          ref: ${{ env.RELEASE_TAG }}
-
-      - name: Download VERSION artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: version-file
-          path: backend/cmd/server/
+          ref: ${{ needs.preflight.outputs.release_sha }}
 
       - name: Download frontend artifact
         uses: actions/download-artifact@v8
@@ -143,6 +132,24 @@ jobs:
       - name: Verify Go version
         run: |
           go version | grep -q 'go1.26.5'
+
+      - name: Verify release version
+        working-directory: backend
+        run: |
+          EXPECTED_VERSION="${RELEASE_TAG#v}"
+          CHECK_BINARY="$RUNNER_TEMP/sub2api-release-version-check"
+          CGO_ENABLED=0 go build \
+            -tags=embed \
+            -ldflags="-X main.Version=${EXPECTED_VERSION}" \
+            -trimpath \
+            -o "$CHECK_BINARY" \
+            ./cmd/server
+          VERSION_OUTPUT=$("$CHECK_BINARY" --version 2>&1)
+          printf '%s\n' "$VERSION_OUTPUT"
+          if ! printf '%s\n' "$VERSION_OUTPUT" | grep -Fq "Sub2API ${EXPECTED_VERSION} "; then
+            echo "Release binary version does not match tag $RELEASE_TAG" >&2
+            exit 1
+          fi
 
       # Docker setup for GoReleaser
       - name: Set up QEMU
@@ -293,33 +300,3 @@ jobs:
                 parse_mode: "Markdown",
                 disable_web_page_preview: true
               }')"
-
-  sync-version-file:
-    needs: [release]
-    if: ${{ needs.release.result == 'success' }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout default branch
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.repository.default_branch }}
-
-      - name: Sync VERSION file to released tag
-        env:
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-        run: |
-          VERSION=${RELEASE_TAG#v}
-
-          CURRENT_VERSION=$(tr -d '\r\n' < backend/cmd/server/VERSION || true)
-          if [ "$CURRENT_VERSION" = "$VERSION" ]; then
-            echo "VERSION file already matches $VERSION"
-            exit 0
-          fi
-
-          echo "$VERSION" > backend/cmd/server/VERSION
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add backend/cmd/server/VERSION
-          git commit -m "chore: sync VERSION to ${VERSION} [skip ci]"
-          git push origin "HEAD:${DEFAULT_BRANCH}"

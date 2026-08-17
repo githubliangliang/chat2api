@@ -18,6 +18,7 @@ jobs:
           /bin/bash deploy/tests/apple-container-test.sh
           /bin/sh deploy/tests/docker-compose-security-test.sh
           /bin/sh deploy/tests/docker-runtime-resources-test.sh
+          /bin/bash deploy/tests/release-tag-preflight-test.sh
           /bin/sh deploy/test-caddyfile-cache.sh
 
   test:

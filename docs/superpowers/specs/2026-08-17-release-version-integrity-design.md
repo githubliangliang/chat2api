@@ -108,16 +108,14 @@ the branch version backward and eliminates cross-release push races.
 
 ### Regression coverage
 
-A shell regression test under `deploy/tests` checks the release contract:
+A shell regression test under `deploy/tests` exercises the tag resolver in a
+temporary Git repository. It verifies that branch names and raw commit IDs are
+rejected while lightweight and annotated tags resolve to the expected peeled
+commit SHA. The existing CI shell job runs this test.
 
-- both GoReleaser files inject `main.Version` from `.Version`;
-- the workflow resolves an exact `refs/tags/` reference;
-- source-consuming jobs checkout the preflight commit SHA;
-- a pre-publish version smoke test is present;
-- version artifact and default-branch synchronization jobs are absent.
-
-The existing CI shell job runs this test. It must fail against the current
-workflow before implementation and pass after the configuration changes.
+The release job itself performs the real binary version smoke test before
+publication. Workflow YAML parsing and shell syntax checks cover the remaining
+configuration wiring without coupling the regression test to source text.
 
 ## Error Handling
 
@@ -129,9 +127,9 @@ workflow before implementation and pass after the configuration changes.
 
 ## Verification
 
-1. Add the release-contract test and confirm it fails because exact-tag
-   preflight, linker version injection, and smoke verification are missing.
-2. Implement the workflow and GoReleaser changes and confirm the test passes.
+1. Add the tag-preflight behavior test and confirm it fails because the resolver
+   is missing.
+2. Implement the resolver and confirm branch/raw-SHA rejection plus tag success.
 3. Parse every workflow YAML file and run `bash -n` over every shell block.
 4. Confirm all referenced Action tags exist remotely.
 5. Build an embedded backend binary with `main.Version=1.1.3` and confirm
