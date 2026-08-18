@@ -177,6 +177,98 @@ func TestApplyMigrationsUpgradesExistingTextTimestampsForTimeScan(t *testing.T) 
 	require.WithinDuration(t, until.UTC(), after.UTC(), time.Second)
 }
 
+func TestApplyMigrationsRemovesDuplicateSQLiteIndexesAndOptimizesPlanner(t *testing.T) {
+	ctx := context.Background()
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared&_pragma=foreign_keys(1)&_time_format=sqlite", t.Name())
+	db, err := sql.Open("sqlite", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	db.SetMaxOpenConns(1)
+
+	require.NoError(t, applyMigrationsFS(ctx, db, migrationsWithout(t, "224_sqlite_redundant_index_cleanup.sql")))
+
+	duplicateIndexes := map[string]string{
+		"usagelog_created_at":                     "CREATE INDEX usagelog_created_at ON usage_logs(created_at)",
+		"usagelog_api_key_id_created_at":          "CREATE INDEX usagelog_api_key_id_created_at ON usage_logs(api_key_id, created_at)",
+		"usagelog_subscription_id":                "CREATE INDEX usagelog_subscription_id ON usage_logs(subscription_id)",
+		"usagelog_group_id":                       "CREATE INDEX usagelog_group_id ON usage_logs(group_id)",
+		"usagelog_user_id_created_at":             "CREATE INDEX usagelog_user_id_created_at ON usage_logs(user_id, created_at)",
+		"usagelog_model":                          "CREATE INDEX usagelog_model ON usage_logs(model)",
+		"usagelog_account_id":                     "CREATE INDEX usagelog_account_id ON usage_logs(account_id)",
+		"usagelog_api_key_id":                     "CREATE INDEX usagelog_api_key_id ON usage_logs(api_key_id)",
+		"usagelog_user_id":                        "CREATE INDEX usagelog_user_id ON usage_logs(user_id)",
+		"idx_usage_logs_billing_dedup_created_at": "CREATE INDEX IF NOT EXISTS idx_usage_logs_billing_dedup_created_at ON usage_logs(created_at)",
+		"account_rate_limit_reset_at":             "CREATE INDEX account_rate_limit_reset_at ON accounts(rate_limit_reset_at)",
+		"account_rate_limited_at":                 "CREATE INDEX account_rate_limited_at ON accounts(rate_limited_at)",
+		"account_schedulable":                     "CREATE INDEX account_schedulable ON accounts(schedulable)",
+		"account_deleted_at":                      "CREATE INDEX account_deleted_at ON accounts(deleted_at)",
+		"account_last_used_at":                    "CREATE INDEX account_last_used_at ON accounts(last_used_at)",
+		"account_priority":                        "CREATE INDEX account_priority ON accounts(priority)",
+		"account_proxy_id":                        "CREATE INDEX account_proxy_id ON accounts(proxy_id)",
+		"account_status":                          "CREATE INDEX account_status ON accounts(status)",
+		"account_type":                            "CREATE INDEX account_type ON accounts(type)",
+		"account_platform":                        "CREATE INDEX account_platform ON accounts(platform)",
+		"accountgroup_priority":                   "CREATE INDEX accountgroup_priority ON account_groups(priority)",
+		"accountgroup_group_id":                   "CREATE INDEX accountgroup_group_id ON account_groups(group_id)",
+	}
+	for name, statement := range duplicateIndexes {
+		_, err = db.ExecContext(ctx, statement)
+		require.NoErrorf(t, err, "create historical duplicate index %s", name)
+	}
+
+	_, err = db.ExecContext(ctx, `CREATE TABLE planner_probe (
+		id INTEGER PRIMARY KEY,
+		category TEXT NOT NULL
+	)`)
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `CREATE INDEX idx_planner_probe_category ON planner_probe(category)`)
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `
+		WITH RECURSIVE seq(n) AS (
+			VALUES(1)
+			UNION ALL
+			SELECT n + 1 FROM seq WHERE n < 100
+		)
+		INSERT INTO planner_probe (id, category)
+		SELECT n, CASE WHEN n <= 90 THEN 'common' ELSE 'rare' END FROM seq
+	`)
+	require.NoError(t, err)
+
+	require.NoError(t, ApplyMigrations(ctx, db))
+
+	for name := range duplicateIndexes {
+		var exists int
+		err = db.QueryRowContext(ctx, `
+			SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = $1
+		`, name).Scan(&exists)
+		require.NoError(t, err)
+		require.Zerof(t, exists, "historical duplicate index %s must be removed", name)
+	}
+
+	for _, name := range []string{
+		"idx_usage_logs_user_id",
+		"idx_accounts_platform",
+		"idx_account_groups_group_id",
+	} {
+		var exists int
+		err = db.QueryRowContext(ctx, `
+			SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = $1
+		`, name).Scan(&exists)
+		require.NoError(t, err)
+		require.Equalf(t, 1, exists, "canonical index %s must remain", name)
+	}
+
+	var plannerStats int
+	err = db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM sqlite_stat1
+		WHERE tbl = 'planner_probe' AND idx = 'idx_planner_probe_category'
+	`).Scan(&plannerStats)
+	require.NoError(t, err)
+	require.Equal(t, 1, plannerStats)
+
+	require.NoError(t, ApplyMigrations(ctx, db), "cleanup migration must be safe on repeated startup")
+}
+
 func migrationsWithout(t *testing.T, skip string) fs.FS {
 	t.Helper()
 	files, err := fs.Glob(migrations.FS, "*.sql")
