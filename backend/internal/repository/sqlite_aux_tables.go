@@ -203,4 +203,3 @@ func isMissingTableOrRelationError(err error) bool {
 	return (strings.Contains(s, "does not exist") && strings.Contains(s, "relation")) ||
 		strings.Contains(s, "no such table")
 }
-

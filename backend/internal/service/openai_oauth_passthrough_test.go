@@ -415,8 +415,9 @@ func TestOpenAIGatewayService_OAuthPassthrough_StreamKeepsToolNameAndBodyNormali
 
 	// 2) only auth is replaced; inbound auth/cookie are not forwarded
 	require.Equal(t, "Bearer oauth-token", upstream.lastReq.Header.Get("Authorization"))
-	// 强制统一出口：客户端自报的 codex_cli_rs/0.1.0 不会到达上游。
-	require.Equal(t, codexCLIUserAgent, upstream.lastReq.Header.Get("User-Agent"))
+	// 官方家族保留，陈旧版本段重建为规范版本。
+	identity := resolveCodexOutboundIdentity("codex_cli_rs/0.1.0")
+	require.Equal(t, identity.userAgent, upstream.lastReq.Header.Get("User-Agent"))
 	require.Empty(t, upstream.lastReq.Header.Get("Cookie"))
 	require.Empty(t, upstream.lastReq.Header.Get("X-Api-Key"))
 	require.Empty(t, upstream.lastReq.Header.Get("X-Goog-Api-Key"))
@@ -1849,8 +1850,8 @@ func TestOpenAIGatewayService_OAuthPassthrough_NonCodexUAFallbackToCodexUA(t *te
 	require.Equal(t, codexCLIUserAgent, upstream.lastReq.Header.Get("User-Agent"))
 }
 
-// 透传模式的 OAuth 与非透传一致：官方客户端身份同样被强制统一为网关规范身份，
-// originator 与 UA 首段天然配套，不会出现历史上 originator/UA 错配被上游 404 的形态
+// 透传模式的 OAuth 与非透传一致：官方客户端家族保留，版本段重建，
+// originator 按最终 UA 首段配对，不会出现历史上 originator/UA 错配被上游 404 的形态
 // （issue #3901）。
 func TestOpenAIGatewayService_OAuthPassthrough_OfficialIdentityUnified(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -1894,12 +1895,13 @@ func TestOpenAIGatewayService_OAuthPassthrough_OfficialIdentityUnified(t *testin
 	_, err := svc.Forward(context.Background(), c, account, inputBody)
 	require.NoError(t, err)
 	require.NotNil(t, upstream.lastReq)
-	require.Equal(t, codexCLIUserAgent, upstream.lastReq.Header.Get("User-Agent"))
-	require.Equal(t, openai.CodexDefaultOriginator, upstream.lastReq.Header.Get("originator"))
-	require.Equal(t, codexCLIVersion, upstream.lastReq.Header.Get("version"))
+	identity := resolveCodexOutboundIdentity(tuiUA)
+	require.Equal(t, identity.userAgent, upstream.lastReq.Header.Get("User-Agent"))
+	require.Equal(t, identity.originator, upstream.lastReq.Header.Get("originator"))
+	require.Equal(t, identity.version, upstream.lastReq.Header.Get("version"))
 }
 
-// 透传模式下真实 TUI 客户端的身份同样被统一：被优先降载的身份不会带到上游。
+// 透传模式下真实 TUI 客户端保留家族/指纹，版本段重建为规范版本。
 func TestOpenAIGatewayService_OAuthPassthrough_CodexTuiIdentityUnified(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -1938,9 +1940,10 @@ func TestOpenAIGatewayService_OAuthPassthrough_CodexTuiIdentityUnified(t *testin
 	_, err := svc.Forward(context.Background(), c, account, inputBody)
 	require.NoError(t, err)
 	require.NotNil(t, upstream.lastReq)
-	require.Equal(t, codexCLIUserAgent, upstream.lastReq.Header.Get("User-Agent"))
-	require.Equal(t, openai.CodexDefaultOriginator, upstream.lastReq.Header.Get("originator"))
-	require.Equal(t, codexCLIVersion, upstream.lastReq.Header.Get("version"))
+	identity := resolveCodexOutboundIdentity("codex-tui/0.140.2 (Mac OS X 14.0; arm64) iTerm (codex-tui; 0.140.2)")
+	require.Equal(t, identity.userAgent, upstream.lastReq.Header.Get("User-Agent"))
+	require.Equal(t, identity.originator, upstream.lastReq.Header.Get("originator"))
+	require.Equal(t, identity.version, upstream.lastReq.Header.Get("version"))
 }
 
 func TestOpenAIGatewayService_CodexCLIOnly_RejectsNonCodexClient(t *testing.T) {

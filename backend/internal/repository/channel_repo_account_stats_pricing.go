@@ -145,7 +145,7 @@ func createAccountStatsPricingRuleTx(ctx context.Context, tx *sql.Tx, rule *serv
 	err := tx.QueryRowContext(ctx,
 		`INSERT INTO channel_account_stats_pricing_rules (channel_id, name, group_ids, account_ids, sort_order)
 		 VALUES ($1, $2, $3, $4, $5) RETURNING id, created_at, updated_at`,
-		 rule.ChannelID, rule.Name, mustJSON(rule.GroupIDs), mustJSON(rule.AccountIDs), rule.SortOrder,
+		rule.ChannelID, rule.Name, mustJSON(rule.GroupIDs), mustJSON(rule.AccountIDs), rule.SortOrder,
 	).Scan(&rule.ID, &rule.CreatedAt, &rule.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("insert account stats pricing rule: %w", err)

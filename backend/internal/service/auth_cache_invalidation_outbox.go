@@ -1,9 +1,9 @@
 package service
 
 import (
-	"github.com/Wei-Shaw/sub2api/internal/config"
 	"context"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"log/slog"
 	"math/rand/v2"
 	"sync"

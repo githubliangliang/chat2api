@@ -91,7 +91,6 @@ func validatePort(port int) bool {
 	return port > 0 && port <= 65535
 }
 
-
 // TestDatabaseRequest represents database test request
 type TestDatabaseRequest struct {
 	Driver   string `json:"driver"`

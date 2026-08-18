@@ -130,7 +130,7 @@ func (r *schedulerOutboxRepository) FirstCreatedAtAfter(ctx context.Context, aft
 
 // scanSchedulerOutboxTime 以列类型无关的方式解析 created_at。
 // 线上 SQLite 的 scheduler_outbox 由 EnsureSQLiteAuxTables 以 TEXT 列先建成
-//（迁移 036 的 DATETIME 定义被 IF NOT EXISTS 空转），modernc 驱动对 TEXT 列
+// （迁移 036 的 DATETIME 定义被 IF NOT EXISTS 空转），modernc 驱动对 TEXT 列
 // 返回 string 而非 time.Time；直接 Scan(*time.Time) 会让 outbox poller 每轮
 // 报错、事件永不消费。无时区后缀的字面量按 CURRENT_TIMESTAMP 语义视为 UTC。
 func scanSchedulerOutboxTime(value any) (time.Time, error) {

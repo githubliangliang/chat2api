@@ -3124,8 +3124,8 @@ func TestOpenAIBuildUpstreamRequestPreservesCodexIdentityHeaders(t *testing.T) {
 func TestOpenAIBuildUpstreamRequestOAuthOfficialClientOriginatorCompatibility(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	// 强制统一出口：客户端自报的 originator / User-Agent 都不参与上游身份构造，
-	// 一律改写为网关规范身份，天然满足 originator 与 UA 首段配套的上游校验（issue #3901）。
+	// OAuth 无账号自定义 UA 时，以客户端 UA 为身份候选：官方家族/指纹保留，
+	// 版本段重建为规范版本；非官方 UA 回退规范 TUI。originator 与最终 UA 首段配套（issue #3901）。
 	tests := []struct {
 		name       string
 		userAgent  string
@@ -3167,9 +3167,10 @@ func TestOpenAIBuildUpstreamRequestOAuthOfficialClientOriginatorCompatibility(t 
 			isCodexCLI := openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator"))
 			req, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, []byte(`{"model":"gpt-5"}`), "token", false, "", isCodexCLI)
 			require.NoError(t, err)
-			require.Equal(t, openai.CodexDefaultOriginator, req.Header.Get("originator"))
-			require.Equal(t, codexCLIUserAgent, req.Header.Get("User-Agent"))
-			require.Equal(t, codexCLIVersion, req.Header.Get("version"))
+			identity := resolveCodexOutboundIdentity(tt.userAgent)
+			require.Equal(t, identity.originator, req.Header.Get("originator"))
+			require.Equal(t, identity.userAgent, req.Header.Get("User-Agent"))
+			require.Equal(t, identity.version, req.Header.Get("version"))
 		})
 	}
 }

@@ -137,10 +137,10 @@ func TestSchedulerOutboxScansTextCreatedAtColumn(t *testing.T) {
 func TestParseSchedulerOutboxTimeCoversEveryWriterFormat(t *testing.T) {
 	for name, literal := range map[string]string{
 		"CURRENT_TIMESTAMP(aux 表默认值)": "2026-08-16 07:30:00",
-		"datetime('now')(迁移默认值)":     "2026-08-16 07:30:00.123",
-		"NOW()(sqlite_pg_compat)":    time.Now().UTC().Format(time.RFC3339Nano),
-		"Go time.Time 带时区偏移":         "2026-08-16 03:29:45.451687748+08:00",
-		"RFC3339 带 T 与偏移":            "2026-08-16T03:29:45.451687748+08:00",
+		"datetime('now')(迁移默认值)":      "2026-08-16 07:30:00.123",
+		"NOW()(sqlite_pg_compat)":     time.Now().UTC().Format(time.RFC3339Nano),
+		"Go time.Time 带时区偏移":          "2026-08-16 03:29:45.451687748+08:00",
+		"RFC3339 带 T 与偏移":             "2026-08-16T03:29:45.451687748+08:00",
 	} {
 		got, err := parseSchedulerOutboxTimeString(literal)
 		require.NoErrorf(t, err, "%s: %q 必须可解析", name, literal)
@@ -151,7 +151,8 @@ func TestParseSchedulerOutboxTimeCoversEveryWriterFormat(t *testing.T) {
 	require.Error(t, err, "无法识别的字面量必须报错，不能静默返回零值")
 }
 
-func TestSetSchedulableSyncsSnapshotOnEnable(t *testing.T) {	cache := &quotaSnapshotCacheStub{}
+func TestSetSchedulableSyncsSnapshotOnEnable(t *testing.T) {
+	cache := &quotaSnapshotCacheStub{}
 	repo, client := newOllamaCloudUsageSQLiteRepository(t)
 	repo.schedulerCache = cache
 	ctx := context.Background()

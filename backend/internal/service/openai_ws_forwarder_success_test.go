@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -760,8 +759,8 @@ func TestOpenAIGatewayService_Forward_WSv2_OAuthStoreFalseByDefault(t *testing.T
 func TestOpenAIGatewayService_Forward_WSv2_OAuthOriginatorCompatibility(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	// WS 握手头与 HTTP 出站共用身份收口：同样强制统一为网关规范身份，
-	// 客户端自报的 originator / user-agent 不参与构造（issue #3901 的配对不变式自然满足）。
+	// WS 握手头与 HTTP 出站共用身份收口：无账号自定义 UA 时以客户端 UA 为候选，
+	// 官方家族/指纹保留，版本段重建；originator 与最终 UA 首段配套（issue #3901）。
 	tests := []struct {
 		name       string
 		userAgent  string
@@ -842,9 +841,10 @@ func TestOpenAIGatewayService_Forward_WSv2_OAuthOriginatorCompatibility(t *testi
 			result, err := svc.Forward(context.Background(), c, account, body)
 			require.NoError(t, err)
 			require.NotNil(t, result)
-			require.Equal(t, openai.CodexDefaultOriginator, captureDialer.lastHeaders.Get("originator"))
-			require.Equal(t, codexCLIUserAgent, captureDialer.lastHeaders.Get("user-agent"))
-			require.Equal(t, codexCLIVersion, captureDialer.lastHeaders.Get("version"))
+			identity := resolveCodexOutboundIdentity(tt.userAgent)
+			require.Equal(t, identity.originator, captureDialer.lastHeaders.Get("originator"))
+			require.Equal(t, identity.userAgent, captureDialer.lastHeaders.Get("user-agent"))
+			require.Equal(t, identity.version, captureDialer.lastHeaders.Get("version"))
 		})
 	}
 }

@@ -23,7 +23,6 @@ func skipSQLiteBackgroundJobs(cfg *config.Config) bool {
 	return cfg != nil && cfg.Database.IsSQLite()
 }
 
-
 func ProvideGrokOAuthService(proxyRepo ProxyRepository, oauthClient GrokOAuthClient, cfg *config.Config, redisClient *redis.Client) *GrokOAuthService {
 	svc := NewGrokOAuthService(proxyRepo, oauthClient, cfg)
 	// wire.go is depguard-exempt for redis; construct the Redis session store here.
