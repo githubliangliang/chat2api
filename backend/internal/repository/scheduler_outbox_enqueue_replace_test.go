@@ -120,6 +120,7 @@ func TestSchedulerOutboxScansTextCreatedAtColumn(t *testing.T) {
 	events, err := repo.ListAfterAndReleaseDedup(context.Background(), 0, 10)
 	require.NoError(t, err, "TEXT created_at must not break the poller scan")
 	require.Len(t, events, 3)
+	require.Equal(t, []int64{1, 2, 3}, []int64{events[0].ID, events[1].ID, events[2].ID})
 	for _, ev := range events {
 		require.False(t, ev.CreatedAt.IsZero(), "row %d created_at must parse", ev.ID)
 	}
@@ -128,6 +129,23 @@ func TestSchedulerOutboxScansTextCreatedAtColumn(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.False(t, got.IsZero())
+}
+
+func TestSchedulerOutboxPreservesDedupKeyWhenPayloadDecodeFails(t *testing.T) {
+	db := newEnqueueOutboxSQLiteDB(t)
+	ctx := context.Background()
+	_, err := db.ExecContext(ctx, `INSERT INTO scheduler_outbox
+		(event_type, account_id, payload, dedup_key) VALUES (?, ?, ?, ?)`,
+		service.SchedulerOutboxEventAccountChanged, 31, `{invalid`, "dedup-invalid")
+	require.NoError(t, err)
+
+	_, err = (&schedulerOutboxRepository{db: db}).ListAfterAndReleaseDedup(ctx, 0, 10)
+	require.Error(t, err)
+
+	var dedupKey sql.NullString
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT dedup_key FROM scheduler_outbox WHERE id = 1`).Scan(&dedupKey))
+	require.True(t, dedupKey.Valid, "failed payload decode must roll back dedup release")
+	require.Equal(t, "dedup-invalid", dedupKey.String)
 }
 
 // created_at 在本仓库有四种来源，写入格式各不相同，解析端必须全部覆盖。

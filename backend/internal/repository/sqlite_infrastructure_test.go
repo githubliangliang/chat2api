@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"testing"
 	"time"
 
@@ -74,4 +75,44 @@ func TestSchedulerOutboxRepositoryRunsOnSQLite(t *testing.T) {
 	require.True(t, acquired)
 	require.NotNil(t, lease)
 	lease.Release()
+}
+
+func TestSchedulerOutboxRepositoryAvoidsDeferredWriteUpgradeBusy(t *testing.T) {
+	dsn := fmt.Sprintf("file:%s/scheduler.db?_pragma=busy_timeout(1000)&_pragma=journal_mode(WAL)&_time_format=sqlite", t.TempDir())
+	db, err := sql.Open("sqlite", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	db.SetMaxOpenConns(2)
+
+	_, err = db.Exec(`CREATE TABLE scheduler_outbox (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		event_type TEXT NOT NULL,
+		account_id INTEGER,
+		group_id INTEGER,
+		payload TEXT,
+		dedup_key TEXT,
+		created_at DATETIME NOT NULL
+	)`)
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO scheduler_outbox
+		(event_type, account_id, payload, dedup_key, created_at)
+		VALUES (?, ?, ?, ?, ?)`, service.SchedulerOutboxEventAccountChanged, 7, `{}`, "dedup-1", time.Now().UTC())
+	require.NoError(t, err)
+
+	// A writer that commits after the poller's deferred read snapshot makes the
+	// old read-then-update implementation fail with SQLITE_BUSY.
+	writer, err := db.BeginTx(context.Background(), nil)
+	require.NoError(t, err)
+	_, err = writer.ExecContext(context.Background(), `UPDATE scheduler_outbox SET payload = payload WHERE id = 1`)
+	require.NoError(t, err)
+
+	result := make(chan error, 1)
+	go func() {
+		_, pollErr := (&schedulerOutboxRepository{db: db}).ListAfterAndReleaseDedup(context.Background(), 0, 1)
+		result <- pollErr
+	}()
+
+	time.Sleep(200 * time.Millisecond)
+	require.NoError(t, writer.Commit())
+	require.NoError(t, <-result)
 }

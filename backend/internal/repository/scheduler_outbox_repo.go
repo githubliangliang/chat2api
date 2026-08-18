@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,23 +37,41 @@ func (r *schedulerOutboxRepository) ListAfterAndReleaseDedup(ctx context.Context
 	if limit <= 0 {
 		limit = 100
 	}
+	var exists int
+	err := r.db.QueryRowContext(ctx, `
+		SELECT 1
+		FROM scheduler_outbox
+		WHERE id > $1
+		LIMIT 1
+	`, afterID).Scan(&exists)
+	if err == sql.ErrNoRows {
+		return make([]service.SchedulerOutboxEvent, 0, limit), nil
+	}
+	if err != nil {
+		return nil, err
+	}
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id, event_type, account_id, group_id, payload, created_at
-		FROM scheduler_outbox
-		WHERE id > $1
-		ORDER BY id ASC
-		LIMIT $2
+		UPDATE scheduler_outbox
+		SET dedup_key = NULL
+		WHERE id IN (
+			SELECT id
+			FROM scheduler_outbox
+			WHERE id > $1
+			ORDER BY id ASC
+			LIMIT $2
+		)
+		RETURNING id, event_type, account_id, group_id, payload, created_at
 	`, afterID, limit)
 	if err != nil {
 		return nil, err
 	}
+	defer func() { _ = rows.Close() }()
 	events := make([]service.SchedulerOutboxEvent, 0, limit)
-	selectedIDs := make([]int64, 0, limit)
 	for rows.Next() {
 		var (
 			payloadRaw []byte
@@ -85,21 +104,14 @@ func (r *schedulerOutboxRepository) ListAfterAndReleaseDedup(ctx context.Context
 			event.Payload = payload
 		}
 		events = append(events, event)
-		selectedIDs = append(selectedIDs, event.ID)
 	}
 	if err := rows.Err(); err != nil {
-		_ = rows.Close()
 		return nil, err
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
 	}
-	if len(selectedIDs) > 0 {
-		where, args := sqlInt64In("id", selectedIDs, 1)
-		if _, err := tx.ExecContext(ctx, "UPDATE scheduler_outbox SET dedup_key = NULL WHERE "+where+" AND dedup_key IS NOT NULL", args...); err != nil {
-			return nil, err
-		}
-	}
+	sort.Slice(events, func(i, j int) bool { return events[i].ID < events[j].ID })
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
