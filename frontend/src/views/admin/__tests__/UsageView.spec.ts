@@ -4,7 +4,7 @@ import { defineComponent, ref } from 'vue'
 
 import UsageView from '../UsageView.vue'
 
-const { list, exportList, getStats, getById, getModelStats, listErrorLogs, routeQuery, aoaToSheet, sheetAddAoa, saveAs, xlsxWrite } = vi.hoisted(() => {
+const { list, exportList, getStats, getById, getModelStats, listErrorLogs, deleteAllErrorLogs, routeQuery, aoaToSheet, sheetAddAoa, saveAs, xlsxWrite } = vi.hoisted(() => {
   vi.stubGlobal('localStorage', {
     getItem: vi.fn(() => null),
     setItem: vi.fn(),
@@ -18,6 +18,7 @@ const { list, exportList, getStats, getById, getModelStats, listErrorLogs, route
     getById: vi.fn(),
     getModelStats: vi.fn(),
     listErrorLogs: vi.fn(),
+    deleteAllErrorLogs: vi.fn(),
     routeQuery: {} as Record<string, string>,
     aoaToSheet: vi.fn(() => ({})),
     sheetAddAoa: vi.fn(),
@@ -75,6 +76,7 @@ vi.mock('xlsx', () => ({
 
 vi.mock('@/api/admin/ops', () => ({
   listErrorLogs,
+  deleteAllErrorLogs,
 }))
 
 vi.mock('@/stores/app', () => ({
@@ -122,7 +124,7 @@ const UsageFiltersStub = defineComponent({
     })
     return { userKeyword }
   },
-  template: '<div><span data-test="user-filter-label">{{ userKeyword }}</span><slot name="after-reset" /></div>',
+  template: '<div><span data-test="user-filter-label">{{ userKeyword }}</span><slot name="after-reset" /><button data-test="cleanup-errors" @click="$emit(\'cleanup\')">cleanup</button></div>',
 })
 const UsageTableStub = {
   props: ['columns'],
@@ -137,6 +139,9 @@ const UserTokenRankingStub = {
   emits: ['select-user'],
   template: '<div data-test="ranking"><button class="pick-user" @click="$emit(\'select-user\', 5, \'rank@test.com\')">pick</button></div>',
 }
+const DateRangePickerStub = {
+  template: '<div data-test="date-range-picker" />',
+}
 
 const defaultStubs = {
   AppLayout: AppLayoutStub,
@@ -147,7 +152,7 @@ const defaultStubs = {
   UsageCleanupDialog: true,
   UserBalanceHistoryModal: true,
   Pagination: true,
-  DateRangePicker: true,
+  DateRangePicker: DateRangePickerStub,
   Icon: true,
   UserTokenRanking: true,
 }
@@ -249,6 +254,24 @@ describe('admin UsageView route filters', () => {
 
     expect(list).toHaveBeenCalledWith(expect.objectContaining({ user_id: 42 }), expect.anything())
     expect(wrapper.find('[data-test="user-filter-label"]').text()).toBe('42')
+  })
+})
+
+describe('admin UsageView time range placement', () => {
+  beforeEach(() => {
+    list.mockReset().mockResolvedValue({ items: [], total: 0, pages: 0 })
+    getStats.mockReset().mockResolvedValue(emptyStats)
+    getModelStats.mockReset().mockResolvedValue({ models: [] })
+    getById.mockReset()
+  })
+
+  it('renders the time range control in its original standalone row', async () => {
+    const wrapper = mountRouteFilteredUsageView()
+    await flushPromises()
+
+    const filter = wrapper.findComponent(UsageFiltersStub)
+    expect(filter.find('[data-test="date-range-picker"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="usage-time-range-row"] [data-test="date-range-picker"]').exists()).toBe(true)
   })
 })
 
@@ -426,6 +449,31 @@ describe('admin UsageView errors tab filter forwarding', () => {
       account_id: 7,
       group_id: 3,
     }))
+  })
+
+  it('clears all error logs after confirmation and refreshes the error list', async () => {
+    deleteAllErrorLogs.mockReset().mockResolvedValue({ deleted: 7 })
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const wrapper = mount(UsageView, {
+      global: { stubs: {
+        ...defaultStubs,
+        OpsErrorLogTable: true,
+        OpsErrorDetailModal: true,
+      } },
+    })
+    await flushPromises()
+
+    await wrapper.findAll('[data-testid="usage-detail-tab"]')[1].trigger('click')
+    await flushPromises()
+    listErrorLogs.mockClear()
+
+    await wrapper.get('[data-test="cleanup-errors"]').trigger('click')
+    await flushPromises()
+
+    expect(confirmSpy).toHaveBeenCalled()
+    expect(deleteAllErrorLogs).toHaveBeenCalledOnce()
+    expect(listErrorLogs).toHaveBeenCalled()
+    confirmSpy.mockRestore()
   })
 })
 

@@ -510,6 +510,7 @@ export default {
       title: 'Usage Records',
       description: 'View and manage all user usage records',
       userFilter: 'User',
+      moreFilters: 'More filters',
       searchUserPlaceholder: 'Search user by email...',
       searchApiKeyPlaceholder: 'Search API key by name...',
       searchAccountPlaceholder: 'Search account by name...',

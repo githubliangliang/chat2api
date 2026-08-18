@@ -224,6 +224,7 @@ func registerOpsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 
 		// Error logs (legacy)
 		ops.GET("/errors", h.Admin.Ops.GetErrorLogs)
+		ops.POST("/errors/cleanup", h.Admin.Ops.DeleteAllErrorLogs)
 		ops.GET("/errors/:id", h.Admin.Ops.GetErrorLogByID)
 		ops.PUT("/errors/:id/resolve", h.Admin.Ops.UpdateErrorResolution)
 

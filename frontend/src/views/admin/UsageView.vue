@@ -2,7 +2,7 @@
   <AppLayout>
     <div class="space-y-6">
       <UsageStatsCards :stats="usageStats" />
-      <div class="card p-4">
+      <div data-test="usage-time-range-row" class="card p-4">
         <div class="flex flex-wrap items-center gap-2">
           <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.dashboard.timeRange') }}:</span>
           <DateRangePicker
@@ -31,7 +31,7 @@
           </button>
         </div>
 
-        <UsageFilters v-model="filters" ref="usageFiltersRef" flat :mode="activeTab" class="border-b border-gray-100 dark:border-dark-700/50" :start-date="startDate" :end-date="endDate" :exporting="exporting" :model-options="modelNameOptions" @change="applyFilters" @refresh="refreshData" @reset="resetFilters" @cleanup="openCleanupDialog" @export="exportToExcel">
+        <UsageFilters v-model="filters" ref="usageFiltersRef" flat :mode="activeTab" class="border-b border-gray-100 dark:border-dark-700/50" :start-date="startDate" :end-date="endDate" :exporting="exporting" :cleaning="errorCleanupLoading" :model-options="modelNameOptions" @change="applyFilters" @refresh="refreshData" @reset="resetFilters" @cleanup="handleCleanup" @export="exportToExcel">
           <template #after-reset>
             <div v-if="activeTab !== 'ranking'" class="relative" ref="columnDropdownRef">
               <button
@@ -146,7 +146,7 @@ import UsageCleanupDialog from '@/components/admin/usage/UsageCleanupDialog.vue'
 import UserBalanceHistoryModal from '@/components/admin/user/UserBalanceHistoryModal.vue'
 import OpsErrorLogTable from '@/views/admin/ops/components/OpsErrorLogTable.vue'
 import OpsErrorDetailModal from '@/views/admin/ops/components/OpsErrorDetailModal.vue'
-import { listErrorLogs } from '@/api/admin/ops'
+import { deleteAllErrorLogs, listErrorLogs } from '@/api/admin/ops'
 import type { OpsErrorLog } from '@/api/admin/ops'
 import Icon from '@/components/icons/Icon.vue'
 import type { AdminUsageLog, AdminUser } from '@/types'; import type { AdminUsageStatsResponse, AdminUsageQueryParams } from '@/api/admin/usage'
@@ -160,6 +160,7 @@ let statsReqSeq = 0
 let modelStatsReqSeq = 0
 const exportProgress = reactive({ show: false, progress: 0, current: 0, total: 0, estimatedTime: '' })
 const cleanupDialogVisible = ref(false)
+const errorCleanupLoading = ref(false)
 // Balance history modal state
 const showBalanceHistoryModal = ref(false)
 const balanceHistoryUser = ref<AdminUser | null>(null)
@@ -412,6 +413,26 @@ const handleIpGeoBatchFailed = () => {
 }
 const cancelExport = () => exportAbortController?.abort()
 const openCleanupDialog = () => { cleanupDialogVisible.value = true }
+const handleCleanup = async () => {
+  if (activeTab.value !== 'errors') {
+    openCleanupDialog()
+    return
+  }
+  if (errorCleanupLoading.value || !window.confirm(t('admin.ops.errorLog.cleanupAllConfirm'))) return
+
+  errorCleanupLoading.value = true
+  try {
+    const result = await deleteAllErrorLogs()
+    appStore.showSuccess(t('admin.ops.errorLog.cleanupAllSuccess', { count: result.deleted || 0 }))
+    errPage.value = 1
+    await loadAdminErrors()
+  } catch (error) {
+    console.error('Failed to clean up error logs:', error)
+    appStore.showError(t('admin.ops.errorLog.cleanupAllFailed'))
+  } finally {
+    errorCleanupLoading.value = false
+  }
+}
 const getRequestTypeLabel = (log: AdminUsageLog): string => {
   const requestType = resolveUsageRequestType(log)
   if (requestType === 'cyber') return t('usage.cyber')

@@ -37,6 +37,8 @@ const messages: Record<string, string> = {
   'common.refresh': 'Refresh',
   'common.reset': 'Reset',
   'admin.usage.cleanup.button': 'Cleanup',
+  'admin.ops.errorLog.cleanupAll': 'Cleanup errors',
+  'admin.usage.moreFilters': 'More filters',
   'usage.exportExcel': 'Export',
 }
 
@@ -134,9 +136,10 @@ describe('UsageFilters — user search dropdown', () => {
     ])
 
     const wrapper = mountFilters()
+    await wrapper.get('[data-test="usage-more-filters"]').trigger('click')
 
     // Trigger focus (sets showUserDropdown = true) then input (fires debounceUserSearch)
-    const input = wrapper.find('input[type="text"]')
+    const input = wrapper.get('[data-test="advanced-filter-user"] input')
     await input.trigger('focus')
     await input.setValue('test')
     await input.trigger('input')
@@ -188,7 +191,8 @@ describe('UsageFilters — user search dropdown', () => {
       .mockImplementationOnce(() => secondSearch.promise)
 
     const wrapper = mountFilters()
-    const input = wrapper.find('input[type="text"]')
+    await wrapper.get('[data-test="usage-more-filters"]').trigger('click')
+    const input = wrapper.get('[data-test="advanced-filter-user"] input')
     await input.trigger('focus')
 
     await input.setValue('a')
@@ -214,7 +218,8 @@ describe('UsageFilters — user search dropdown', () => {
     mockSearchUsers.mockImplementationOnce(() => pendingSearch.promise)
 
     const wrapper = mountFilters()
-    const input = wrapper.find('input[type="text"]')
+    await wrapper.get('[data-test="usage-more-filters"]').trigger('click')
+    const input = wrapper.get('[data-test="advanced-filter-user"] input')
     await input.trigger('focus')
 
     await input.setValue('stale')
@@ -229,6 +234,103 @@ describe('UsageFilters — user search dropdown', () => {
     await flushPromises()
     expect(wrapper.text()).not.toContain('stale@test.com')
   })
+})
+
+describe('UsageFilters error cleanup action', () => {
+  it('shows a cleanup button for errors and emits cleanup', async () => {
+    const wrapper = mount(UsageFilters, {
+      props: {
+        modelValue: defaultFilters(),
+        exporting: false,
+        startDate: '2026-05-01',
+        endDate: '2026-05-28',
+        showActions: true,
+        mode: 'errors',
+      },
+      global: { stubs: { Select: true, Teleport: true } },
+    })
+
+    const button = wrapper.findAll('button').find((item) => item.text() === 'Cleanup errors')
+    expect(button).toBeDefined()
+    await button!.trigger('click')
+    expect(wrapper.emitted('cleanup')).toHaveLength(1)
+    expect(wrapper.text()).not.toContain('Export')
+  })
+})
+
+describe('UsageFilters compact filter layout', () => {
+  const mountMode = (mode: 'usage' | 'errors' | 'ranking', modelValue = defaultFilters()) => mount(UsageFilters, {
+    props: {
+      modelValue,
+      exporting: false,
+      startDate: '2026-05-01',
+      endDate: '2026-05-28',
+      showActions: false,
+      mode,
+    },
+    global: { stubs: { Select: true, Teleport: true, Icon: true } },
+  })
+
+  it.each([
+    ['usage', false, false],
+    ['errors', true, false],
+    ['ranking', false, true],
+  ] as const)('keeps model and group visible while %s-specific filters expand from the dropdown', async (mode, hasErrorFilters, hasRankingFilters) => {
+    const wrapper = mountMode(mode)
+
+    expect(wrapper.find('[data-test="primary-filter-model"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="primary-filter-group"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="advanced-filter-user"]').exists()).toBe(false)
+
+    await wrapper.get('[data-test="usage-more-filters"]').trigger('click')
+
+    expect(wrapper.find('[data-test="advanced-filter-user"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="advanced-filter-api-key"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="advanced-filter-account"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="advanced-filter-error-type"]').exists()).toBe(hasErrorFilters)
+    expect(wrapper.find('[data-test="advanced-filter-request-type"]').exists()).toBe(hasRankingFilters)
+  })
+
+  it('shows the number of active advanced filters on the dropdown trigger', () => {
+    const filters = defaultFilters()
+    filters.user_id = 12
+    filters.account_id = 7
+    const wrapper = mountMode('usage', filters)
+
+    expect(wrapper.get('[data-test="more-filter-count"]').text()).toBe('2')
+  })
+
+  it('aligns the dropdown to the filter row to avoid viewport overflow', async () => {
+    const wrapper = mountMode('usage')
+
+    await wrapper.get('[data-test="usage-more-filters"]').trigger('click')
+
+    expect(wrapper.get('[data-test="usage-filter-row"]').classes()).toContain('relative')
+    const panelClasses = wrapper.get('#usage-advanced-filters').classes()
+    expect(panelClasses).toContain('left-0')
+    expect(panelClasses).not.toContain('right-0')
+  })
+
+  it('places filters and actions on one row only at the wide-screen breakpoint', () => {
+    const wrapper = mount(UsageFilters, {
+      props: {
+        modelValue: defaultFilters(),
+        exporting: false,
+        startDate: '2026-05-01',
+        endDate: '2026-05-28',
+        showActions: true,
+      },
+      global: { stubs: { Select: true, Teleport: true, Icon: true } },
+    })
+
+    const toolbar = wrapper.get('[data-test="usage-filter-row"]').element.parentElement
+    expect(toolbar?.classList.contains('2xl:flex-row')).toBe(true)
+
+    const actions = wrapper.find('[data-test="usage-filter-actions"]')
+    expect(actions.exists()).toBe(true)
+    expect(actions.classes()).toContain('2xl:shrink-0')
+  })
+
 })
 
 describe('UsageFilters — model options come from prop (no dup request)', () => {
@@ -276,8 +378,9 @@ describe('UsageFilters — usage tab hides billing/type filters', () => {
     })
   }
 
-  it('hides type, billing type, billing mode, and upstream model audit on usage details', () => {
+  it('hides type, billing type, billing mode, and upstream model audit on usage details', async () => {
     const wrapper = mountWithMode('usage')
+    await wrapper.get('[data-test="usage-more-filters"]').trigger('click')
     const text = wrapper.text()
     expect(text).not.toContain('Type')
     expect(text).not.toContain('Billing Type')
@@ -285,8 +388,9 @@ describe('UsageFilters — usage tab hides billing/type filters', () => {
     expect(text).not.toContain('Upstream model audit')
   })
 
-  it('keeps type and billing type on the ranking tab', () => {
+  it('keeps type and billing type on the ranking tab', async () => {
     const wrapper = mountWithMode('ranking')
+    await wrapper.get('[data-test="usage-more-filters"]').trigger('click')
     const text = wrapper.text()
     expect(text).toContain('Type')
     expect(text).toContain('Billing Type')
@@ -294,4 +398,3 @@ describe('UsageFilters — usage tab hides billing/type filters', () => {
     expect(text).not.toContain('Upstream model audit')
   })
 })
-

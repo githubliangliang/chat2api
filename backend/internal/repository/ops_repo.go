@@ -393,6 +393,17 @@ LIMIT $` + itoa(len(args)+1) + ` OFFSET $` + itoa(len(args)+2)
 	}, nil
 }
 
+func (r *opsRepository) DeleteAllErrorLogs(ctx context.Context) (int64, error) {
+	if r == nil || r.db == nil {
+		return 0, fmt.Errorf("nil ops repository")
+	}
+	result, err := r.db.ExecContext(ctx, `DELETE FROM ops_error_logs`)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 func (r *opsRepository) GetErrorLogByID(ctx context.Context, id int64) (*service.OpsErrorLogDetail, error) {
 	if r == nil || r.db == nil {
 		return nil, fmt.Errorf("nil ops repository")

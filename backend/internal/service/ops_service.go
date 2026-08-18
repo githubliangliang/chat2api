@@ -633,6 +633,22 @@ func (s *OpsService) GetErrorLogs(ctx context.Context, filter *OpsErrorLogFilter
 	return result, nil
 }
 
+// DeleteAllErrorLogs removes every stored operational error log.
+func (s *OpsService) DeleteAllErrorLogs(ctx context.Context) (int64, error) {
+	if err := s.RequireMonitoringEnabled(ctx); err != nil {
+		return 0, err
+	}
+	if s.opsRepo == nil {
+		return 0, nil
+	}
+	deleted, err := s.opsRepo.DeleteAllErrorLogs(ctx)
+	if err != nil {
+		log.Printf("[Ops] DeleteAllErrorLogs failed: %v", err)
+		return 0, err
+	}
+	return deleted, nil
+}
+
 // ListUserErrorRequests 返回某个用户自己的错误请求（精简脱敏）。
 // 强制：仅当前用户、View=all（含业务限流/余额类）、排除 count_tokens 噪声。
 func (s *OpsService) ListUserErrorRequests(ctx context.Context, userID int64, filter *OpsErrorLogFilter) (*UserErrorRequestList, error) {

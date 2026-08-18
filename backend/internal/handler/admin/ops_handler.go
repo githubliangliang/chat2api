@@ -211,6 +211,30 @@ func (h *OpsHandler) GetErrorLogs(c *gin.Context) {
 	response.Paginated(c, result.Errors, int64(result.Total), result.Page, result.PageSize)
 }
 
+// DeleteAllErrorLogs deletes all stored operational error logs.
+// POST /api/v1/admin/ops/errors/cleanup
+func (h *OpsHandler) DeleteAllErrorLogs(c *gin.Context) {
+	if h.opsService == nil {
+		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
+		return
+	}
+	if err := h.opsService.RequireMonitoringEnabled(c.Request.Context()); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if subject, ok := middleware.GetAuthSubjectFromContext(c); !ok || subject.UserID <= 0 {
+		response.Error(c, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	deleted, err := h.opsService.DeleteAllErrorLogs(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"deleted": deleted})
+}
+
 // ListRequestErrors lists client-visible request errors.
 // GET /api/v1/admin/ops/request-errors
 func (h *OpsHandler) ListRequestErrors(c *gin.Context) {
