@@ -91,13 +91,13 @@ func newAccountRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor, schedul
 }
 
 func (r *accountRepository) Create(ctx context.Context, account *service.Account) error {
-	if err := createAccountRecord(ctx, r.client, account); err != nil {
-		return err
-	}
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &account.ID, nil, buildSchedulerGroupPayload(account.GroupIDs)); err != nil {
-		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue account create failed: account=%d err=%v", account.ID, err)
-	}
-	return nil
+	_, err := withRepositoryTransaction(ctx, r.client, func(txCtx context.Context, client *dbent.Client) error {
+		if err := createAccountRecord(txCtx, client, account); err != nil {
+			return err
+		}
+		return enqueueSchedulerOutbox(txCtx, client, service.SchedulerOutboxEventAccountChanged, &account.ID, nil, buildSchedulerGroupPayload(account.GroupIDs))
+	})
+	return err
 }
 
 func createAccountRecord(ctx context.Context, client *dbent.Client, account *service.Account) error {
@@ -1687,18 +1687,22 @@ func (r *accountRepository) syncSchedulerAccountSnapshots(ctx context.Context, a
 }
 
 func (r *accountRepository) ClearError(ctx context.Context, id int64) error {
-	_, err := r.client.Account.Update().
-		Where(dbaccount.IDEQ(id)).
-		SetStatus(service.StatusActive).
-		SetErrorMessage("").
-		Save(ctx)
+	committed, err := withRepositoryTransaction(ctx, r.client, func(txCtx context.Context, client *dbent.Client) error {
+		if _, err := client.Account.Update().
+			Where(dbaccount.IDEQ(id)).
+			SetStatus(service.StatusActive).
+			SetErrorMessage("").
+			Save(txCtx); err != nil {
+			return err
+		}
+		return enqueueSchedulerOutbox(txCtx, client, service.SchedulerOutboxEventAccountChanged, &id, nil, nil)
+	})
 	if err != nil {
 		return err
 	}
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
-		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue clear error failed: account=%d err=%v", id, err)
+	if committed {
+		r.syncSchedulerAccountSnapshot(ctx, id)
 	}
-	r.syncSchedulerAccountSnapshot(ctx, id)
 	return nil
 }
 
@@ -2149,29 +2153,35 @@ func (r *accountRepository) SetRateLimitedIfLater(ctx context.Context, id int64,
 // by a successful request. Matching both timestamps prevents a stale success
 // from erasing a later clear/re-arm generation with an equal or shorter reset.
 func (r *accountRepository) ClearRateLimitIfObserved(ctx context.Context, id int64, observedLimitedAt, observedResetAt time.Time) (bool, error) {
-	updated, err := r.client.Account.Update().
-		Where(
-			dbaccount.IDEQ(id),
-			dbaccount.PlatformEQ(service.PlatformGrok),
-			dbaccount.TypeEQ(service.AccountTypeOAuth),
-			dbaccount.RateLimitedAtEQ(observedLimitedAt),
-			dbaccount.RateLimitResetAtEQ(observedResetAt),
-		).
-		ClearRateLimitedAt().
-		ClearRateLimitResetAt().
-		Save(ctx)
+	changed := false
+	committed, err := withRepositoryTransaction(ctx, r.client, func(txCtx context.Context, client *dbent.Client) error {
+		updated, err := client.Account.Update().
+			Where(
+				dbaccount.IDEQ(id),
+				dbaccount.PlatformEQ(service.PlatformGrok),
+				dbaccount.TypeEQ(service.AccountTypeOAuth),
+				dbaccount.RateLimitedAtEQ(observedLimitedAt),
+				dbaccount.RateLimitResetAtEQ(observedResetAt),
+			).
+			ClearRateLimitedAt().
+			ClearRateLimitResetAt().
+			Save(txCtx)
+		if err != nil {
+			return err
+		}
+		changed = updated > 0
+		if !changed {
+			return nil
+		}
+		return enqueueSchedulerOutbox(txCtx, client, service.SchedulerOutboxEventAccountChanged, &id, nil, nil)
+	})
 	if err != nil {
 		return false, err
 	}
-	if updated == 0 {
+	if committed {
 		r.syncSchedulerAccountSnapshot(ctx, id)
-		return false, nil
 	}
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
-		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue observed rate-limit clear failed: account=%d err=%v", id, err)
-	}
-	r.syncSchedulerAccountSnapshot(ctx, id)
-	return true, nil
+	return changed, nil
 }
 
 func (r *accountRepository) SetModelRateLimit(ctx context.Context, id int64, scope string, resetAt time.Time, reason ...string) error {
@@ -2296,73 +2306,84 @@ func (r *accountRepository) SetGrokCredentialTempUnschedulableIfMatch(
 }
 
 func (r *accountRepository) ClearTempUnschedulable(ctx context.Context, id int64) error {
-	_, err := r.sql.ExecContext(ctx, `
-		UPDATE accounts
-		SET temp_unschedulable_until = NULL,
-			temp_unschedulable_reason = NULL,
-			updated_at = CURRENT_TIMESTAMP
-		WHERE id = $1
-			AND deleted_at IS NULL
-	`, id)
+	committed, err := withRepositoryTransaction(ctx, r.client, func(txCtx context.Context, client *dbent.Client) error {
+		if _, err := client.ExecContext(txCtx, `
+			UPDATE accounts
+			SET temp_unschedulable_until = NULL,
+				temp_unschedulable_reason = NULL,
+				updated_at = CURRENT_TIMESTAMP
+			WHERE id = $1
+				AND deleted_at IS NULL
+		`, id); err != nil {
+			return err
+		}
+		return enqueueSchedulerOutbox(txCtx, client, service.SchedulerOutboxEventAccountChanged, &id, nil, nil)
+	})
 	if err != nil {
 		return err
 	}
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
-		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue clear temp unschedulable failed: account=%d err=%v", id, err)
+	if committed {
+		r.syncSchedulerAccountSnapshot(ctx, id)
 	}
-	r.syncSchedulerAccountSnapshot(ctx, id)
 	return nil
 }
 
 func (r *accountRepository) ClearRateLimit(ctx context.Context, id int64) error {
-	_, err := r.client.Account.Update().
-		Where(dbaccount.IDEQ(id)).
-		ClearRateLimitedAt().
-		ClearRateLimitResetAt().
-		ClearOverloadUntil().
-		Save(ctx)
+	committed, err := withRepositoryTransaction(ctx, r.client, func(txCtx context.Context, client *dbent.Client) error {
+		if _, err := client.Account.Update().
+			Where(dbaccount.IDEQ(id)).
+			ClearRateLimitedAt().
+			ClearRateLimitResetAt().
+			ClearOverloadUntil().
+			Save(txCtx); err != nil {
+			return err
+		}
+		return enqueueSchedulerOutbox(txCtx, client, service.SchedulerOutboxEventAccountChanged, &id, nil, nil)
+	})
 	if err != nil {
 		return err
 	}
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
-		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue clear rate limit failed: account=%d err=%v", id, err)
+	if committed {
+		r.syncSchedulerAccountSnapshot(ctx, id)
 	}
-	r.syncSchedulerAccountSnapshot(ctx, id)
 	return nil
 }
 
 func (r *accountRepository) ClearAntigravityQuotaScopes(ctx context.Context, id int64) error {
-	client := clientFromContext(ctx, r.client)
-	current, err := client.Account.Get(ctx, id)
-	if err != nil {
-		return translatePersistenceError(err, service.ErrAccountNotFound, nil)
-	}
-	extra := normalizeJSONMap(current.Extra)
-	delete(extra, "antigravity_quota_scopes")
-	if _, err := client.Account.UpdateOneID(id).SetExtra(extra).Save(ctx); err != nil {
-		return translatePersistenceError(err, service.ErrAccountNotFound, nil)
-	}
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
-		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue clear quota scopes failed: account=%d err=%v", id, err)
-	}
-	return nil
+	_, err := withRepositoryTransaction(ctx, r.client, func(txCtx context.Context, client *dbent.Client) error {
+		current, err := client.Account.Get(txCtx, id)
+		if err != nil {
+			return translatePersistenceError(err, service.ErrAccountNotFound, nil)
+		}
+		extra := normalizeJSONMap(current.Extra)
+		delete(extra, "antigravity_quota_scopes")
+		if _, err := client.Account.UpdateOneID(id).SetExtra(extra).Save(txCtx); err != nil {
+			return translatePersistenceError(err, service.ErrAccountNotFound, nil)
+		}
+		return enqueueSchedulerOutbox(txCtx, client, service.SchedulerOutboxEventAccountChanged, &id, nil, nil)
+	})
+	return err
 }
 
 func (r *accountRepository) ClearModelRateLimits(ctx context.Context, id int64) error {
-	client := clientFromContext(ctx, r.client)
-	current, err := client.Account.Get(ctx, id)
+	committed, err := withRepositoryTransaction(ctx, r.client, func(txCtx context.Context, client *dbent.Client) error {
+		current, err := client.Account.Get(txCtx, id)
+		if err != nil {
+			return translatePersistenceError(err, service.ErrAccountNotFound, nil)
+		}
+		extra := normalizeJSONMap(current.Extra)
+		delete(extra, "model_rate_limits")
+		if _, err := client.Account.UpdateOneID(id).SetExtra(extra).Save(txCtx); err != nil {
+			return translatePersistenceError(err, service.ErrAccountNotFound, nil)
+		}
+		return enqueueSchedulerOutbox(txCtx, client, service.SchedulerOutboxEventAccountChanged, &id, nil, nil)
+	})
 	if err != nil {
-		return translatePersistenceError(err, service.ErrAccountNotFound, nil)
+		return err
 	}
-	extra := normalizeJSONMap(current.Extra)
-	delete(extra, "model_rate_limits")
-	if _, err := client.Account.UpdateOneID(id).SetExtra(extra).Save(ctx); err != nil {
-		return translatePersistenceError(err, service.ErrAccountNotFound, nil)
+	if committed {
+		r.syncSchedulerAccountSnapshot(ctx, id)
 	}
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
-		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue clear model rate limit failed: account=%d err=%v", id, err)
-	}
-	r.syncSchedulerAccountSnapshot(ctx, id)
 	return nil
 }
 
@@ -2404,20 +2425,24 @@ func (r *accountRepository) UpdateSessionWindowEnd(ctx context.Context, id int64
 }
 
 func (r *accountRepository) SetSchedulable(ctx context.Context, id int64, schedulable bool) error {
-	_, err := r.client.Account.Update().
-		Where(dbaccount.IDEQ(id)).
-		SetSchedulable(schedulable).
-		Save(ctx)
+	committed, err := withRepositoryTransaction(ctx, r.client, func(txCtx context.Context, client *dbent.Client) error {
+		if _, err := client.Account.Update().
+			Where(dbaccount.IDEQ(id)).
+			SetSchedulable(schedulable).
+			Save(txCtx); err != nil {
+			return err
+		}
+		return enqueueSchedulerOutbox(txCtx, client, service.SchedulerOutboxEventAccountChanged, &id, nil, nil)
+	})
 	if err != nil {
 		return err
-	}
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
-		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue schedulable change failed: account=%d err=%v", id, err)
 	}
 	// 开启与关闭都要立即回写调度缓存的账号快照：outbox 只保证桶成员最终一致
 	// （poller 周期消费），账号级 meta 若只在关闭时同步，重新启用的账号在下一次
 	// 桶重建前会一直以 schedulable=false 的旧 meta 参与水合，被调度层拒绝。
-	r.syncSchedulerAccountSnapshot(ctx, id)
+	if committed {
+		r.syncSchedulerAccountSnapshot(ctx, id)
+	}
 	return nil
 }
 
@@ -3432,23 +3457,28 @@ func accountQuotaJustExceeded(accountType string, before, after map[string]any) 
 // ResetQuotaUsed 重置账号所有维度的配额用量为 0
 // 保留固定重置模式的配置字段（quota_daily_reset_mode 等），仅清零用量和窗口起始时间
 func (r *accountRepository) ResetQuotaUsed(ctx context.Context, id int64) error {
-	current, err := r.client.Account.Get(ctx, id)
+	committed, err := withRepositoryTransaction(ctx, r.client, func(txCtx context.Context, client *dbent.Client) error {
+		current, err := client.Account.Get(txCtx, id)
+		if err != nil {
+			return translatePersistenceError(err, service.ErrAccountNotFound, nil)
+		}
+		extra := normalizeJSONMap(current.Extra)
+		extra["quota_used"], extra["quota_daily_used"], extra["quota_weekly_used"] = 0, 0, 0
+		for _, key := range []string{"quota_daily_start", "quota_weekly_start", "quota_daily_reset_at", "quota_weekly_reset_at"} {
+			delete(extra, key)
+		}
+		if _, err := client.Account.UpdateOneID(id).SetExtra(extra).Save(txCtx); err != nil {
+			return err
+		}
+		return enqueueSchedulerOutbox(txCtx, client, service.SchedulerOutboxEventAccountChanged, &id, nil, nil)
+	})
 	if err != nil {
-		return translatePersistenceError(err, service.ErrAccountNotFound, nil)
-	}
-	extra := normalizeJSONMap(current.Extra)
-	extra["quota_used"], extra["quota_daily_used"], extra["quota_weekly_used"] = 0, 0, 0
-	for _, key := range []string{"quota_daily_start", "quota_weekly_start", "quota_daily_reset_at", "quota_weekly_reset_at"} {
-		delete(extra, key)
-	}
-	if _, err := r.client.Account.UpdateOneID(id).SetExtra(extra).Save(ctx); err != nil {
 		return err
 	}
 	// 重置配额后触发调度快照刷新，使账号重新参与调度
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
-		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue quota reset failed: account=%d err=%v", id, err)
+	if committed {
+		r.syncSchedulerAccountSnapshotDetached(ctx, id)
 	}
-	r.syncSchedulerAccountSnapshotDetached(ctx, id)
 	return nil
 }
 

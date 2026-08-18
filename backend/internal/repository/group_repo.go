@@ -43,13 +43,13 @@ func newGroupRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor) *groupRep
 }
 
 func (r *groupRepository) Create(ctx context.Context, groupIn *service.Group) error {
-	if err := createGroupRecord(ctx, r.client, groupIn); err != nil {
-		return err
-	}
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &groupIn.ID, nil); err != nil {
-		logger.LegacyPrintf("repository.group", "[SchedulerOutbox] enqueue group create failed: group=%d err=%v", groupIn.ID, err)
-	}
-	return nil
+	_, err := withRepositoryTransaction(ctx, r.client, func(txCtx context.Context, client *dbent.Client) error {
+		if err := createGroupRecord(txCtx, client, groupIn); err != nil {
+			return err
+		}
+		return enqueueSchedulerOutbox(txCtx, client, service.SchedulerOutboxEventGroupChanged, nil, &groupIn.ID, nil)
+	})
+	return err
 }
 
 func createGroupRecord(ctx context.Context, client *dbent.Client, groupIn *service.Group) error {
@@ -244,159 +244,164 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 	if err != nil {
 		return fmt.Errorf("marshal group model pricing: %w", err)
 	}
-	builder := r.client.Group.UpdateOneID(groupIn.ID).
-		SetName(groupIn.Name).
-		SetDescription(groupIn.Description).
-		SetPlatform(groupIn.Platform).
-		SetRateMultiplier(groupIn.RateMultiplier).
-		SetIsExclusive(groupIn.IsExclusive).
-		SetStatus(groupIn.Status).
-		SetSubscriptionType(groupIn.SubscriptionType).
-		SetNillableDailyLimitUsd(groupIn.DailyLimitUSD).
-		SetNillableWeeklyLimitUsd(groupIn.WeeklyLimitUSD).
-		SetNillableMonthlyLimitUsd(groupIn.MonthlyLimitUSD).
-		SetAllowImageGeneration(groupIn.AllowImageGeneration).
-		SetAllowBatchImageGeneration(groupIn.AllowBatchImageGeneration).
-		SetImageRateIndependent(groupIn.ImageRateIndependent).
-		SetImageRateMultiplier(groupIn.ImageRateMultiplier).
-		SetNillableImagePrice1k(groupIn.ImagePrice1K).
-		SetNillableImagePrice2k(groupIn.ImagePrice2K).
-		SetNillableImagePrice4k(groupIn.ImagePrice4K).
-		SetBatchImageDiscountMultiplier(groupIn.BatchImageDiscountMultiplier).
-		SetBatchImageHoldMultiplier(groupIn.BatchImageHoldMultiplier).
-		SetVideoRateIndependent(groupIn.VideoRateIndependent).
-		SetVideoRateMultiplier(groupIn.VideoRateMultiplier).
-		SetNillableVideoPrice480p(groupIn.VideoPrice480P).
-		SetNillableVideoPrice720p(groupIn.VideoPrice720P).
-		SetNillableVideoPrice1080p(groupIn.VideoPrice1080P).
-		SetVideoModelPrices(service.NormalizeVideoModelPrices(groupIn.VideoModelPrices)).
-		SetLongContextPricingEnabled(groupIn.LongContextPricingEnabled).
-		SetModelPricing(modelPricing).
-		SetDefaultValidityDays(groupIn.DefaultValidityDays).
-		SetClaudeCodeOnly(groupIn.ClaudeCodeOnly).
-		SetModelRoutingEnabled(groupIn.ModelRoutingEnabled).
-		SetMcpXMLInject(groupIn.MCPXMLInject).
-		SetAllowMessagesDispatch(groupIn.AllowMessagesDispatch).
-		SetAllowLive(groupIn.AllowLive).
-		SetRequireOauthOnly(groupIn.RequireOAuthOnly).
-		SetRequirePrivacySet(groupIn.RequirePrivacySet).
-		SetDefaultMappedModel(groupIn.DefaultMappedModel).
-		SetMessagesDispatchModelConfig(groupIn.MessagesDispatchModelConfig).
-		SetModelsListConfig(groupIn.ModelsListConfig).
-		SetRpmLimit(groupIn.RPMLimit).
-		SetMaxReasoningEffort(groupIn.MaxReasoningEffort).
-		SetReasoningEffortMappings(groupIn.ReasoningEffortMappings).
-		SetPeakRateEnabled(groupIn.PeakRateEnabled).
-		SetPeakStart(groupIn.PeakStart).
-		SetPeakEnd(groupIn.PeakEnd).
-		SetPeakRateMultiplier(groupIn.PeakRateMultiplier).
-		SetProfitControlEnabled(groupIn.ProfitControlEnabled).
-		SetProfitMinMargin(groupIn.ProfitMinMargin).
-		SetProfitSafetyBuffer(groupIn.ProfitSafetyBuffer)
+	updatedAt := groupIn.UpdatedAt
+	_, err = withRepositoryTransaction(ctx, r.client, func(txCtx context.Context, client *dbent.Client) error {
+		builder := client.Group.UpdateOneID(groupIn.ID).
+			SetName(groupIn.Name).
+			SetDescription(groupIn.Description).
+			SetPlatform(groupIn.Platform).
+			SetRateMultiplier(groupIn.RateMultiplier).
+			SetIsExclusive(groupIn.IsExclusive).
+			SetStatus(groupIn.Status).
+			SetSubscriptionType(groupIn.SubscriptionType).
+			SetNillableDailyLimitUsd(groupIn.DailyLimitUSD).
+			SetNillableWeeklyLimitUsd(groupIn.WeeklyLimitUSD).
+			SetNillableMonthlyLimitUsd(groupIn.MonthlyLimitUSD).
+			SetAllowImageGeneration(groupIn.AllowImageGeneration).
+			SetAllowBatchImageGeneration(groupIn.AllowBatchImageGeneration).
+			SetImageRateIndependent(groupIn.ImageRateIndependent).
+			SetImageRateMultiplier(groupIn.ImageRateMultiplier).
+			SetNillableImagePrice1k(groupIn.ImagePrice1K).
+			SetNillableImagePrice2k(groupIn.ImagePrice2K).
+			SetNillableImagePrice4k(groupIn.ImagePrice4K).
+			SetBatchImageDiscountMultiplier(groupIn.BatchImageDiscountMultiplier).
+			SetBatchImageHoldMultiplier(groupIn.BatchImageHoldMultiplier).
+			SetVideoRateIndependent(groupIn.VideoRateIndependent).
+			SetVideoRateMultiplier(groupIn.VideoRateMultiplier).
+			SetNillableVideoPrice480p(groupIn.VideoPrice480P).
+			SetNillableVideoPrice720p(groupIn.VideoPrice720P).
+			SetNillableVideoPrice1080p(groupIn.VideoPrice1080P).
+			SetVideoModelPrices(service.NormalizeVideoModelPrices(groupIn.VideoModelPrices)).
+			SetLongContextPricingEnabled(groupIn.LongContextPricingEnabled).
+			SetModelPricing(modelPricing).
+			SetDefaultValidityDays(groupIn.DefaultValidityDays).
+			SetClaudeCodeOnly(groupIn.ClaudeCodeOnly).
+			SetModelRoutingEnabled(groupIn.ModelRoutingEnabled).
+			SetMcpXMLInject(groupIn.MCPXMLInject).
+			SetAllowMessagesDispatch(groupIn.AllowMessagesDispatch).
+			SetAllowLive(groupIn.AllowLive).
+			SetRequireOauthOnly(groupIn.RequireOAuthOnly).
+			SetRequirePrivacySet(groupIn.RequirePrivacySet).
+			SetDefaultMappedModel(groupIn.DefaultMappedModel).
+			SetMessagesDispatchModelConfig(groupIn.MessagesDispatchModelConfig).
+			SetModelsListConfig(groupIn.ModelsListConfig).
+			SetRpmLimit(groupIn.RPMLimit).
+			SetMaxReasoningEffort(groupIn.MaxReasoningEffort).
+			SetReasoningEffortMappings(groupIn.ReasoningEffortMappings).
+			SetPeakRateEnabled(groupIn.PeakRateEnabled).
+			SetPeakStart(groupIn.PeakStart).
+			SetPeakEnd(groupIn.PeakEnd).
+			SetPeakRateMultiplier(groupIn.PeakRateMultiplier).
+			SetProfitControlEnabled(groupIn.ProfitControlEnabled).
+			SetProfitMinMargin(groupIn.ProfitMinMargin).
+			SetProfitSafetyBuffer(groupIn.ProfitSafetyBuffer)
 
-	// 显式处理可空字段：nil 需要 clear，非 nil 需要 set。
-	if groupIn.DailyLimitUSD != nil {
-		builder = builder.SetDailyLimitUsd(*groupIn.DailyLimitUSD)
-	} else {
-		builder = builder.ClearDailyLimitUsd()
-	}
-	if groupIn.WeeklyLimitUSD != nil {
-		builder = builder.SetWeeklyLimitUsd(*groupIn.WeeklyLimitUSD)
-	} else {
-		builder = builder.ClearWeeklyLimitUsd()
-	}
-	if groupIn.MonthlyLimitUSD != nil {
-		builder = builder.SetMonthlyLimitUsd(*groupIn.MonthlyLimitUSD)
-	} else {
-		builder = builder.ClearMonthlyLimitUsd()
-	}
-	if groupIn.ImagePrice1K != nil {
-		builder = builder.SetImagePrice1k(*groupIn.ImagePrice1K)
-	} else {
-		builder = builder.ClearImagePrice1k()
-	}
-	if groupIn.ImagePrice2K != nil {
-		builder = builder.SetImagePrice2k(*groupIn.ImagePrice2K)
-	} else {
-		builder = builder.ClearImagePrice2k()
-	}
-	if groupIn.ImagePrice4K != nil {
-		builder = builder.SetImagePrice4k(*groupIn.ImagePrice4K)
-	} else {
-		builder = builder.ClearImagePrice4k()
-	}
-	if groupIn.VideoPrice480P != nil {
-		builder = builder.SetVideoPrice480p(*groupIn.VideoPrice480P)
-	} else {
-		builder = builder.ClearVideoPrice480p()
-	}
-	if groupIn.VideoPrice720P != nil {
-		builder = builder.SetVideoPrice720p(*groupIn.VideoPrice720P)
-	} else {
-		builder = builder.ClearVideoPrice720p()
-	}
-	if groupIn.VideoPrice1080P != nil {
-		builder = builder.SetVideoPrice1080p(*groupIn.VideoPrice1080P)
-	} else {
-		builder = builder.ClearVideoPrice1080p()
-	}
-	if groupIn.WebSearchPricePerCall != nil {
-		builder = builder.SetWebSearchPricePerCall(*groupIn.WebSearchPricePerCall)
-	} else {
-		builder = builder.ClearWebSearchPricePerCall()
-	}
-	if groupIn.SearchPricePer1k != nil {
-		builder = builder.SetSearchPricePer1k(*groupIn.SearchPricePer1k)
-	} else {
-		builder = builder.ClearSearchPricePer1k()
-	}
-	if groupIn.AudioRealtimePricePerMin != nil {
-		builder = builder.SetAudioRealtimePricePerMin(*groupIn.AudioRealtimePricePerMin)
-	} else {
-		builder = builder.ClearAudioRealtimePricePerMin()
-	}
-	if groupIn.AudioTTSPricePerMillionChars != nil {
-		builder = builder.SetAudioTtsPricePerMillionChars(*groupIn.AudioTTSPricePerMillionChars)
-	} else {
-		builder = builder.ClearAudioTtsPricePerMillionChars()
-	}
-	if groupIn.AudioSTTPricePerHour != nil {
-		builder = builder.SetAudioSttPricePerHour(*groupIn.AudioSTTPricePerHour)
-	} else {
-		builder = builder.ClearAudioSttPricePerHour()
-	}
+		// 显式处理可空字段：nil 需要 clear，非 nil 需要 set。
+		if groupIn.DailyLimitUSD != nil {
+			builder = builder.SetDailyLimitUsd(*groupIn.DailyLimitUSD)
+		} else {
+			builder = builder.ClearDailyLimitUsd()
+		}
+		if groupIn.WeeklyLimitUSD != nil {
+			builder = builder.SetWeeklyLimitUsd(*groupIn.WeeklyLimitUSD)
+		} else {
+			builder = builder.ClearWeeklyLimitUsd()
+		}
+		if groupIn.MonthlyLimitUSD != nil {
+			builder = builder.SetMonthlyLimitUsd(*groupIn.MonthlyLimitUSD)
+		} else {
+			builder = builder.ClearMonthlyLimitUsd()
+		}
+		if groupIn.ImagePrice1K != nil {
+			builder = builder.SetImagePrice1k(*groupIn.ImagePrice1K)
+		} else {
+			builder = builder.ClearImagePrice1k()
+		}
+		if groupIn.ImagePrice2K != nil {
+			builder = builder.SetImagePrice2k(*groupIn.ImagePrice2K)
+		} else {
+			builder = builder.ClearImagePrice2k()
+		}
+		if groupIn.ImagePrice4K != nil {
+			builder = builder.SetImagePrice4k(*groupIn.ImagePrice4K)
+		} else {
+			builder = builder.ClearImagePrice4k()
+		}
+		if groupIn.VideoPrice480P != nil {
+			builder = builder.SetVideoPrice480p(*groupIn.VideoPrice480P)
+		} else {
+			builder = builder.ClearVideoPrice480p()
+		}
+		if groupIn.VideoPrice720P != nil {
+			builder = builder.SetVideoPrice720p(*groupIn.VideoPrice720P)
+		} else {
+			builder = builder.ClearVideoPrice720p()
+		}
+		if groupIn.VideoPrice1080P != nil {
+			builder = builder.SetVideoPrice1080p(*groupIn.VideoPrice1080P)
+		} else {
+			builder = builder.ClearVideoPrice1080p()
+		}
+		if groupIn.WebSearchPricePerCall != nil {
+			builder = builder.SetWebSearchPricePerCall(*groupIn.WebSearchPricePerCall)
+		} else {
+			builder = builder.ClearWebSearchPricePerCall()
+		}
+		if groupIn.SearchPricePer1k != nil {
+			builder = builder.SetSearchPricePer1k(*groupIn.SearchPricePer1k)
+		} else {
+			builder = builder.ClearSearchPricePer1k()
+		}
+		if groupIn.AudioRealtimePricePerMin != nil {
+			builder = builder.SetAudioRealtimePricePerMin(*groupIn.AudioRealtimePricePerMin)
+		} else {
+			builder = builder.ClearAudioRealtimePricePerMin()
+		}
+		if groupIn.AudioTTSPricePerMillionChars != nil {
+			builder = builder.SetAudioTtsPricePerMillionChars(*groupIn.AudioTTSPricePerMillionChars)
+		} else {
+			builder = builder.ClearAudioTtsPricePerMillionChars()
+		}
+		if groupIn.AudioSTTPricePerHour != nil {
+			builder = builder.SetAudioSttPricePerHour(*groupIn.AudioSTTPricePerHour)
+		} else {
+			builder = builder.ClearAudioSttPricePerHour()
+		}
 
-	// 处理 FallbackGroupID：nil 时清除，否则设置
-	if groupIn.FallbackGroupID != nil {
-		builder = builder.SetFallbackGroupID(*groupIn.FallbackGroupID)
-	} else {
-		builder = builder.ClearFallbackGroupID()
-	}
-	// 处理 FallbackGroupIDOnInvalidRequest：nil 时清除，否则设置
-	if groupIn.FallbackGroupIDOnInvalidRequest != nil {
-		builder = builder.SetFallbackGroupIDOnInvalidRequest(*groupIn.FallbackGroupIDOnInvalidRequest)
-	} else {
-		builder = builder.ClearFallbackGroupIDOnInvalidRequest()
-	}
+		// 处理 FallbackGroupID：nil 时清除，否则设置
+		if groupIn.FallbackGroupID != nil {
+			builder = builder.SetFallbackGroupID(*groupIn.FallbackGroupID)
+		} else {
+			builder = builder.ClearFallbackGroupID()
+		}
+		// 处理 FallbackGroupIDOnInvalidRequest：nil 时清除，否则设置
+		if groupIn.FallbackGroupIDOnInvalidRequest != nil {
+			builder = builder.SetFallbackGroupIDOnInvalidRequest(*groupIn.FallbackGroupIDOnInvalidRequest)
+		} else {
+			builder = builder.ClearFallbackGroupIDOnInvalidRequest()
+		}
 
-	// 处理 ModelRouting：nil 时清除，否则设置
-	if groupIn.ModelRouting != nil {
-		builder = builder.SetModelRouting(groupIn.ModelRouting)
-	} else {
-		builder = builder.ClearModelRouting()
-	}
+		// 处理 ModelRouting：nil 时清除，否则设置
+		if groupIn.ModelRouting != nil {
+			builder = builder.SetModelRouting(groupIn.ModelRouting)
+		} else {
+			builder = builder.ClearModelRouting()
+		}
 
-	// 处理 SupportedModelScopes（始终设置，空数组表示不限制）
-	builder = builder.SetSupportedModelScopes(groupIn.SupportedModelScopes)
+		// 处理 SupportedModelScopes（始终设置，空数组表示不限制）
+		builder = builder.SetSupportedModelScopes(groupIn.SupportedModelScopes)
 
-	updated, err := builder.Save(ctx)
+		updated, err := builder.Save(txCtx)
+		if err != nil {
+			return translatePersistenceError(err, service.ErrGroupNotFound, service.ErrGroupExists)
+		}
+		updatedAt = updated.UpdatedAt
+		return enqueueSchedulerOutbox(txCtx, client, service.SchedulerOutboxEventGroupChanged, nil, &groupIn.ID, nil)
+	})
 	if err != nil {
-		return translatePersistenceError(err, service.ErrGroupNotFound, service.ErrGroupExists)
+		return err
 	}
-	groupIn.UpdatedAt = updated.UpdatedAt
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &groupIn.ID, nil); err != nil {
-		logger.LegacyPrintf("repository.group", "[SchedulerOutbox] enqueue group update failed: group=%d err=%v", groupIn.ID, err)
-	}
+	groupIn.UpdatedAt = updatedAt
 	return nil
 }
 

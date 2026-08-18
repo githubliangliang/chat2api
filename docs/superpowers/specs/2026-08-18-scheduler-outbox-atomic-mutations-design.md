@@ -39,7 +39,8 @@ The following remain out of scope:
 - Group bulk binding and clearing
 - Making account creation plus later group binding one service-level transaction
 - Making the multi-step admin clear-error workflow one transaction
-- Generic transaction helpers, SQLite retry behavior, or scheduler redesign
+- A generic cross-repository transaction framework, SQLite retry behavior, or
+  scheduler redesign
 
 ## Design
 
@@ -57,9 +58,11 @@ optimization. It runs only after a locally owned transaction commits and never
 substitutes for a durable outbox event. When a caller owns the transaction, the
 method does not publish uncommitted state to the cache.
 
-No shared transaction abstraction is added. The implementation follows the
-existing `BindGroups`, `Update`, and `UpdateCredentials` patterns locally so the
-behavioral change stays visible at each mutation site.
+A small repository-internal helper owns the repeated begin/reuse/commit/rollback
+mechanics and reports whether it committed locally. It is intentionally limited
+to this transaction boundary and does not abstract business mutations, outbox
+events, retries, or cache behavior. Each mutation site still explicitly performs
+its business write and outbox enqueue in the helper callback.
 
 ## Error Handling
 

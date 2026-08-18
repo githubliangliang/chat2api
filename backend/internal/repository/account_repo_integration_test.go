@@ -803,7 +803,7 @@ func (s *AccountRepoSuite) TestListSchedulableByGroupIDAndPlatform() {
 	s.Require().Equal(a1.ID, accounts[0].ID)
 }
 
-func (s *AccountRepoSuite) TestSetSchedulable() {
+func (s *AccountRepoSuite) TestSetSchedulable_DoesNotSyncSchedulerSnapshotInsideCallerTransaction() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-sched", Schedulable: true})
 	cacheRecorder := &schedulerCacheRecorder{}
 	s.repo.schedulerCache = cacheRecorder
@@ -813,8 +813,7 @@ func (s *AccountRepoSuite) TestSetSchedulable() {
 	got, err := s.repo.GetByID(s.ctx, account.ID)
 	s.Require().NoError(err)
 	s.Require().False(got.Schedulable)
-	s.Require().Len(cacheRecorder.setAccounts, 1)
-	s.Require().Equal(account.ID, cacheRecorder.setAccounts[0].ID)
+	s.Require().Empty(cacheRecorder.setAccounts, "caller-owned transaction must not publish uncommitted scheduler state")
 }
 
 func (s *AccountRepoSuite) TestBulkUpdate_SyncSchedulerSnapshotOnDisabled() {
@@ -989,10 +988,7 @@ func (s *AccountRepoSuite) TestTempUnschedulableFieldsLoadedByGetByIDAndGetByIDs
 	s.Require().NoError(err)
 	s.Require().Nil(cleared.TempUnschedulableUntil)
 	s.Require().Equal("", cleared.TempUnschedulableReason)
-	s.Require().Len(cacheRecorder.setAccounts, 1)
-	s.Require().Equal(acc1.ID, cacheRecorder.setAccounts[0].ID)
-	s.Require().Nil(cacheRecorder.setAccounts[0].TempUnschedulableUntil)
-	s.Require().Equal("", cacheRecorder.setAccounts[0].TempUnschedulableReason)
+	s.Require().Empty(cacheRecorder.setAccounts, "caller-owned transaction must not publish uncommitted scheduler state")
 }
 
 func (s *AccountRepoSuite) TestSetTempUnschedulableSkipsOutboxWhenWindowDoesNotExtend() {
@@ -1026,7 +1022,7 @@ func (s *AccountRepoSuite) TestSetTempUnschedulableSkipsOutboxWhenWindowDoesNotE
 	s.Require().WithinDuration(until, *got.TempUnschedulableUntil, time.Second)
 }
 
-func (s *AccountRepoSuite) TestClearModelRateLimits_SyncsSchedulerSnapshot() {
+func (s *AccountRepoSuite) TestClearModelRateLimits_DoesNotSyncSchedulerSnapshotInsideCallerTransaction() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{
 		Name: "acc-clear-model-rate",
 		Extra: map[string]any{
@@ -1045,9 +1041,7 @@ func (s *AccountRepoSuite) TestClearModelRateLimits_SyncsSchedulerSnapshot() {
 	got, err := s.repo.GetByID(s.ctx, account.ID)
 	s.Require().NoError(err)
 	s.Require().NotContains(got.Extra, "model_rate_limits")
-	s.Require().Len(cacheRecorder.setAccounts, 1)
-	s.Require().Equal(account.ID, cacheRecorder.setAccounts[0].ID)
-	s.Require().NotContains(cacheRecorder.setAccounts[0].Extra, "model_rate_limits")
+	s.Require().Empty(cacheRecorder.setAccounts, "caller-owned transaction must not publish uncommitted scheduler state")
 }
 
 // --- UpdateLastUsed ---
@@ -1386,7 +1380,7 @@ func (s *AccountRepoSuite) TestUpdateErrorStatusUnschedulesAccount() {
 	s.Require().False(got.Schedulable)
 }
 
-func (s *AccountRepoSuite) TestClearError_SyncSchedulerSnapshotOnRecovery() {
+func (s *AccountRepoSuite) TestClearError_DoesNotSyncSchedulerSnapshotInsideCallerTransaction() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{
 		Name:         "acc-clear-err",
 		Status:       service.StatusError,
@@ -1401,9 +1395,7 @@ func (s *AccountRepoSuite) TestClearError_SyncSchedulerSnapshotOnRecovery() {
 	s.Require().NoError(err)
 	s.Require().Equal(service.StatusActive, got.Status)
 	s.Require().Empty(got.ErrorMessage)
-	s.Require().Len(cacheRecorder.setAccounts, 1)
-	s.Require().Equal(account.ID, cacheRecorder.setAccounts[0].ID)
-	s.Require().Equal(service.StatusActive, cacheRecorder.setAccounts[0].Status)
+	s.Require().Empty(cacheRecorder.setAccounts, "caller-owned transaction must not publish uncommitted scheduler state")
 }
 
 // --- UpdateSessionWindow ---
