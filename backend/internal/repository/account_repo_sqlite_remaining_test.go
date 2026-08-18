@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	dbaccountgroup "github.com/Wei-Shaw/sub2api/ent/accountgroup"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
@@ -82,4 +83,54 @@ func TestAccountRepositorySQLiteRemainingPaths(t *testing.T) {
 	updated, err = client.Account.Get(ctx, updated.ID)
 	require.NoError(t, err)
 	require.NotContains(t, updated.Extra, service.UpstreamBillingProbeExtraKey)
+}
+
+func TestAccountRepositoryBindGroupsRollsBackWhenSchedulerOutboxWriteFails(t *testing.T) {
+	repo, client := newOllamaCloudUsageSQLiteRepository(t)
+	ctx := context.Background()
+	_, err := repo.sql.ExecContext(ctx, `CREATE TABLE scheduler_outbox (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		event_type TEXT NOT NULL,
+		account_id INTEGER,
+		group_id INTEGER,
+		payload TEXT,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		dedup_key TEXT UNIQUE
+	)`)
+	require.NoError(t, err)
+
+	account, err := client.Account.Create().
+		SetName("bind-groups-atomic").
+		SetPlatform(service.PlatformGrok).
+		SetType(service.AccountTypeAPIKey).
+		SetStatus(service.StatusActive).
+		SetSchedulable(true).
+		SetCredentials(map[string]any{"api_key": "test"}).
+		SetExtra(map[string]any{}).
+		Save(ctx)
+	require.NoError(t, err)
+	group, err := client.Group.Create().
+		SetName("bind-groups-atomic-group").
+		SetPlatform(service.PlatformGrok).
+		SetStatus(service.StatusActive).
+		Save(ctx)
+	require.NoError(t, err)
+
+	_, err = repo.sql.ExecContext(ctx, `
+		CREATE TRIGGER fail_scheduler_outbox_insert
+		BEFORE INSERT ON scheduler_outbox
+		BEGIN
+			SELECT RAISE(ABORT, 'scheduler outbox unavailable');
+		END`)
+	require.NoError(t, err)
+
+	err = repo.BindGroups(ctx, account.ID, []int64{group.ID})
+	require.Error(t, err)
+
+	bindings, err := client.AccountGroup.Query().Where(
+		dbaccountgroup.AccountIDEQ(account.ID),
+		dbaccountgroup.GroupIDEQ(group.ID),
+	).Count(ctx)
+	require.NoError(t, err)
+	require.Zero(t, bindings)
 }
