@@ -1,5 +1,9 @@
 //go:build integration
 
+// Repository DB integration tests still contain PostgreSQL-only SQL.
+// They are compiled with `-tags=integration,postgres` and are not part of
+// the default sqlite-only `make test-integration` suite. This harness keeps
+// Redis (Docker) plus a local SQLite schema for the remaining tests.
 package repository
 
 import (
@@ -9,6 +13,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -23,16 +28,12 @@ import (
 
 	"entgo.io/ent/dialect"
 	entsql "entgo.io/ent/dialect/sql"
-	_ "github.com/lib/pq"
 	redisclient "github.com/redis/go-redis/v9"
-	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	tcredis "github.com/testcontainers/testcontainers-go/modules/redis"
+	_ "modernc.org/sqlite"
 )
 
-const (
-	redisImageTag    = "redis:8.4-alpine"
-	postgresImageTag = "postgres:18.1-alpine3.23"
-)
+const redisImageTag = "redis:8.4-alpine"
 
 var (
 	integrationDB        *sql.DB
@@ -51,7 +52,7 @@ func TestMain(m *testing.M) {
 	}
 
 	if !dockerIsAvailable(ctx) {
-		// In CI we expect Docker to be available so integration tests should fail loudly.
+		// Redis cache tests still need Docker. In CI that must fail loudly.
 		if os.Getenv("CI") != "" {
 			log.Printf("docker is not available (CI=true); failing integration tests")
 			os.Exit(1)
@@ -60,20 +61,41 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 
-	postgresImage := selectDockerImage(ctx, postgresImageTag)
-	pgContainer, err := tcpostgres.Run(
-		ctx,
-		postgresImage,
-		tcpostgres.WithDatabase("sub2api_test"),
-		tcpostgres.WithUsername("postgres"),
-		tcpostgres.WithPassword("postgres"),
-		tcpostgres.BasicWaitStrategies(),
-	)
+	tmpDir, err := os.MkdirTemp("", "sub2api-it-")
 	if err != nil {
-		log.Printf("failed to start postgres container: %v", err)
+		log.Printf("failed to create sqlite temp dir: %v", err)
 		os.Exit(1)
 	}
-	defer func() { _ = pgContainer.Terminate(ctx) }()
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	registerSQLitePGCompatFunctions()
+	dsn := fmt.Sprintf(
+		"file:%s?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_time_format=sqlite",
+		filepath.Join(tmpDir, "integration.db"),
+	)
+	integrationDB, err = sql.Open("sqlite", dsn)
+	if err != nil {
+		log.Printf("failed to open sqlite: %v", err)
+		os.Exit(1)
+	}
+	// WAL allows concurrent readers; keep a small pool so tests can mix
+	// an Ent transaction with extra raw SQL on integrationDB.
+	integrationDB.SetMaxOpenConns(8)
+	if err := EnsureSQLiteAuxTables(ctx, integrationDB); err != nil {
+		log.Printf("failed to ensure sqlite aux tables: %v", err)
+		os.Exit(1)
+	}
+	if err := ApplyMigrations(ctx, integrationDB); err != nil {
+		log.Printf("failed to apply db migrations: %v", err)
+		os.Exit(1)
+	}
+	if err := EnsureSQLiteAuxTables(ctx, integrationDB); err != nil {
+		log.Printf("failed to ensure sqlite aux tables after migrate: %v", err)
+		os.Exit(1)
+	}
+
+	drv := entsql.OpenDB(dialect.SQLite, integrationDB)
+	integrationEntClient = dbent.NewClient(dbent.Driver(drv))
 
 	redisContainer, err := tcredis.Run(
 		ctx,
@@ -84,26 +106,6 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	defer func() { _ = redisContainer.Terminate(ctx) }()
-
-	dsn, err := pgContainer.ConnectionString(ctx, "sslmode=disable", "TimeZone=UTC")
-	if err != nil {
-		log.Printf("failed to get postgres dsn: %v", err)
-		os.Exit(1)
-	}
-
-	integrationDB, err = openSQLWithRetry(ctx, dsn, 30*time.Second)
-	if err != nil {
-		log.Printf("failed to open sql db: %v", err)
-		os.Exit(1)
-	}
-	if err := ApplyMigrations(ctx, integrationDB); err != nil {
-		log.Printf("failed to apply db migrations: %v", err)
-		os.Exit(1)
-	}
-
-	// 创建 ent client 用于集成测试
-	drv := entsql.OpenDB(dialect.Postgres, integrationDB)
-	integrationEntClient = dbent.NewClient(dbent.Driver(drv))
 
 	redisHost, err := redisContainer.Host(ctx)
 	if err != nil {
@@ -138,66 +140,6 @@ func dockerIsAvailable(ctx context.Context) bool {
 	cmd := exec.CommandContext(ctx, "docker", "info")
 	cmd.Env = os.Environ()
 	return cmd.Run() == nil
-}
-
-// selectDockerImage resolves the container image for the harness.
-//
-// SUB2API_TEST_POSTGRES_IMAGE overrides the PostgreSQL image so the suite can be
-// run against the oldest documented-supported server, not just the newest. That
-// matters for SQL that behaves differently across major versions: jsonpath
-// .datetime() only accepts the ISO-8601 "Z" designator from PostgreSQL 17 on, so
-// a suite pinned to 18 cannot observe breakage on 14-16.
-//
-//	SUB2API_TEST_POSTGRES_IMAGE=postgres:15-alpine go test -tags integration ./internal/repository/
-func selectDockerImage(ctx context.Context, preferred string) string {
-	if override := strings.TrimSpace(os.Getenv("SUB2API_TEST_POSTGRES_IMAGE")); override != "" &&
-		strings.HasPrefix(preferred, "postgres:") {
-		return override
-	}
-	if dockerImageExists(ctx, preferred) {
-		return preferred
-	}
-
-	return preferred
-}
-
-func dockerImageExists(ctx context.Context, image string) bool {
-	cmd := exec.CommandContext(ctx, "docker", "image", "inspect", image)
-	cmd.Env = os.Environ()
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	return cmd.Run() == nil
-}
-
-func openSQLWithRetry(ctx context.Context, dsn string, timeout time.Duration) (*sql.DB, error) {
-	deadline := time.Now().Add(timeout)
-	var lastErr error
-
-	for time.Now().Before(deadline) {
-		db, err := sql.Open("postgres", dsn)
-		if err != nil {
-			lastErr = err
-			time.Sleep(250 * time.Millisecond)
-			continue
-		}
-
-		if err := pingWithTimeout(ctx, db, 2*time.Second); err != nil {
-			lastErr = err
-			_ = db.Close()
-			time.Sleep(250 * time.Millisecond)
-			continue
-		}
-
-		return db, nil
-	}
-
-	return nil, fmt.Errorf("db not ready after %s: %w", timeout, lastErr)
-}
-
-func pingWithTimeout(ctx context.Context, db *sql.DB, timeout time.Duration) error {
-	pingCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	return db.PingContext(pingCtx)
 }
 
 func testTx(t *testing.T) *sql.Tx {
