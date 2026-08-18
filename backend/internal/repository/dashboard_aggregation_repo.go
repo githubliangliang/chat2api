@@ -459,8 +459,3 @@ func (r *dashboardAggregationRepository) upsertDailyAggregates(ctx context.Conte
 func truncateToDay(t time.Time) time.Time {
 	return timezone.StartOfDay(t)
 }
-
-func truncateToMonthUTC(t time.Time) time.Time {
-	t = t.UTC()
-	return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
-}

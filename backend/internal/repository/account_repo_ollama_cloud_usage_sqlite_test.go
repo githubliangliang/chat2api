@@ -30,7 +30,7 @@ func newOllamaCloudUsageSQLiteRepository(t *testing.T) (*accountRepository, *dbe
 func TestListOllamaCloudUsageGroupAccountsSQLiteUsesJSON1AndIn(t *testing.T) {
 	db, err := sql.Open("sqlite", "file:ollama-cloud-group-sqlite?mode=memory&cache=shared")
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	_, err = db.Exec(`CREATE TABLE accounts (
 		id INTEGER PRIMARY KEY,
 		deleted_at DATETIME,
@@ -41,7 +41,7 @@ func TestListOllamaCloudUsageGroupAccountsSQLiteUsesJSON1AndIn(t *testing.T) {
 	require.NoError(t, err)
 
 	client := dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.SQLite, db)))
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	repo := newAccountRepositoryWithSQL(client, db, nil)
 
 	accounts, err := repo.ListOllamaCloudUsageGroupAccounts(context.Background(), []*service.Account{{

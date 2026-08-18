@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"regexp"
 	"testing"
 
@@ -50,6 +51,6 @@ func TestOllamaCloudUsageSessionRequiredGuards(t *testing.T) {
 	repo := &accountRepository{}
 	account := ollamaCloudUsageRepositoryAccount()
 	delete(account.Extra, service.OllamaCloudUsageSessionExtraKey)
-	require.ErrorIs(t, repo.SetOllamaCloudUsageAutoRefresh(nil, account, true), service.ErrOllamaCloudUsageSessionRequired)
-	require.ErrorIs(t, repo.DisableOllamaCloudUsageAutoRefresh(nil, account), service.ErrOllamaCloudUsageSessionRequired)
+	require.ErrorIs(t, repo.SetOllamaCloudUsageAutoRefresh(context.TODO(), account, true), service.ErrOllamaCloudUsageSessionRequired)
+	require.ErrorIs(t, repo.DisableOllamaCloudUsageAutoRefresh(context.TODO(), account), service.ErrOllamaCloudUsageSessionRequired)
 }

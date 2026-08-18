@@ -27,10 +27,6 @@ const ollamaCloudUsageEligibleSQL = `
 	AND json_type(credentials, '$.api_key') = 'text'
 `
 
-func ollamaCloudBaseURLMatchesSQL(expression string) string {
-	return "lower(trim(" + expression + ")) IN ('https://ollama.com', 'https://ollama.com/v1', 'https://ollama.com:443', 'https://ollama.com:443/v1', 'https://www.ollama.com', 'https://www.ollama.com/v1', 'https://www.ollama.com:443', 'https://www.ollama.com:443/v1')"
-}
-
 // ListOllamaCloudUsageGroupAccounts resolves every sibling for all supplied
 // identities with one ID query and one batch hydration. API keys are query
 // parameters only; no derived shared key is persisted.

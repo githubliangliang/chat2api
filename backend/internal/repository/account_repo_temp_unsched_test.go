@@ -306,7 +306,7 @@ func TestAccountRepository_ListOAuthRefreshCandidatePage_SQLFilter(t *testing.T)
 func TestAccountRepository_ListOAuthRefreshCandidatePageSQLite(t *testing.T) {
 	db, err := sql.Open("sqlite", "file:oauth-refresh-candidates?mode=memory&cache=shared")
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	_, err = db.Exec(`CREATE TABLE accounts (
 		id INTEGER PRIMARY KEY, deleted_at DATETIME, schedulable BOOLEAN,
 		platform TEXT, status TEXT, type TEXT, credentials TEXT,

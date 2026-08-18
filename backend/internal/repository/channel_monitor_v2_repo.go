@@ -1068,19 +1068,19 @@ func (r *channelMonitorV2Repository) GetAggregationWatermark(ctx context.Context
 	}
 	out := &service.ChannelMonitorV2AggregationWatermark{HasData: dataThrough.Valid}
 	if usageStart.Valid {
-		out.UsageCoverageStart = usageStart.Time.UTC()
+		out.UsageCoverageStart = usageStart.UTC()
 	}
 	if errorStart.Valid {
-		out.ErrorCoverageStart = errorStart.Time.UTC()
+		out.ErrorCoverageStart = errorStart.UTC()
 	}
 	if dataThrough.Valid {
-		out.DataThrough = dataThrough.Time.UTC()
+		out.DataThrough = dataThrough.UTC()
 	}
 	if computed.Valid {
-		out.LastSuccessfulAt = computed.Time.UTC()
+		out.LastSuccessfulAt = computed.UTC()
 	}
 	if backfill.Valid {
-		out.BackfillCursor = backfill.Time.UTC()
+		out.BackfillCursor = backfill.UTC()
 	}
 	return out, nil
 }

@@ -31,7 +31,7 @@ func TestWriteOpenAIFastPolicyBlockedResponseMarksBusinessLimited(t *testing.T) 
 func TestOpsMetricsCollectorQueryUsageLatencySQLite(t *testing.T) {
 	db, err := sql.Open("sqlite", "file:ops-metrics-latency?mode=memory&cache=shared")
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	_, err = db.Exec(`CREATE TABLE usage_logs (created_at DATETIME, duration_ms INTEGER, first_token_ms INTEGER)`)
 	require.NoError(t, err)
 	_, err = db.Exec(`INSERT INTO usage_logs(created_at, duration_ms, first_token_ms) VALUES
@@ -88,7 +88,7 @@ func TestOpsMetricsCollectorQueryErrorCountsExcludesCountTokens(t *testing.T) {
 func TestOpsMetricsCollectorQueryAccountSwitchCountSQLite(t *testing.T) {
 	db, err := sql.Open("sqlite", "file:ops-metrics-switch-count?mode=memory&cache=shared")
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	require.NoError(t, func() error {
 		_, err := db.Exec(`CREATE TABLE ops_error_logs (
 			created_at DATETIME, is_count_tokens BOOLEAN, upstream_errors TEXT

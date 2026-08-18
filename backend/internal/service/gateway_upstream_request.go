@@ -186,7 +186,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 
 	// 客户端 User-Agent 直接透传：指纹统一 / OAuth 默认头可能覆盖了入站 UA。
 	// OAuth mimic 路径需要强制 Claude Code 身份，不透传第三方 UA。
-	if !(tokenType == "oauth" && mimicClaudeCode) {
+	if tokenType != "oauth" || !mimicClaudeCode {
 		applyClientUserAgentPassthrough(req.Header, clientHeaders, true)
 	}
 

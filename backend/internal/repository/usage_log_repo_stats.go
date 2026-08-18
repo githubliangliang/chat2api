@@ -5,8 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"os"
-	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -257,19 +255,6 @@ func (r *usageLogRepository) GetDailyStatsAggregated(ctx context.Context, userID
 	}
 
 	return result, nil
-}
-
-// resolveUsageStatsTimezone 获取用于 SQL 分组的时区名称。
-// 优先使用应用初始化的时区，其次尝试读取 TZ 环境变量，最后回落为 UTC。
-func resolveUsageStatsTimezone() string {
-	tzName := timezone.Name()
-	if tzName != "" && tzName != "Local" {
-		return tzName
-	}
-	if envTZ := strings.TrimSpace(os.Getenv("TZ")); envTZ != "" {
-		return envTZ
-	}
-	return "UTC"
 }
 
 // GetAccountTodayStats 获取账号今日统计

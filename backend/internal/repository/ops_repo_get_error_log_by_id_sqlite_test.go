@@ -90,7 +90,8 @@ func TestOpsRequestErrorQueries_SQLite_NoPostgresOnlySyntax(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	repo := NewOpsRepository(db).(*opsRepository)
+	repo, ok := NewOpsRepository(db).(*opsRepository)
+	require.True(t, ok)
 	ctx := context.Background()
 
 	upstreamJSON := `[{"kind":"http","status":502}]`

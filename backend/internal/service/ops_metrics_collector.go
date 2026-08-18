@@ -467,7 +467,7 @@ func (c *OpsMetricsCollector) queryUsageLatency(ctx context.Context, start, end 
 		if err != nil {
 			return opsCollectedPercentiles{}, err
 		}
-		defer rows.Close()
+		defer func() { _ = rows.Close() }()
 		values := make([]float64, 0)
 		for rows.Next() {
 			var value float64
@@ -904,14 +904,6 @@ func (c *OpsMetricsCollector) maybeLogSkip() {
 	}
 	c.skipLogAt = now
 	log.Printf("[OpsMetricsCollector] leader lock held by another instance; skipping")
-}
-
-func floatToIntPtr(v sql.NullFloat64) *int {
-	if !v.Valid {
-		return nil
-	}
-	n := int(math.Round(v.Float64))
-	return &n
 }
 
 func roundTo1DP(v float64) float64 {

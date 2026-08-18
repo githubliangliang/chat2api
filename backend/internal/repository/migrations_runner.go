@@ -281,7 +281,7 @@ func applyMigrationsFS(ctx context.Context, db *sql.DB, fsys fs.FS) error {
 					continue
 				}
 				if _, err := lockConn.ExecContext(ctx, trimmed); err != nil {
-					if !(sqlite && isSQLiteIgnorableMigrationError(err)) {
+					if !sqlite || !isSQLiteIgnorableMigrationError(err) {
 						return fmt.Errorf("apply migration %s (non-tx statement %d): %w", name, i+1, err)
 					}
 				}
@@ -655,27 +655,27 @@ func splitSQLStatements(content string) []string {
 		}
 
 		if inLineComment {
-			b.WriteByte(ch)
+			_ = b.WriteByte(ch)
 			if ch == '\n' {
 				inLineComment = false
 			}
 			continue
 		}
 		if inBlockComment {
-			b.WriteByte(ch)
+			_ = b.WriteByte(ch)
 			if ch == '*' && next == '/' {
-				b.WriteByte(next)
+				_ = b.WriteByte(next)
 				i++
 				inBlockComment = false
 			}
 			continue
 		}
 		if inSingleQuote {
-			b.WriteByte(ch)
+			_ = b.WriteByte(ch)
 			// SQL escapes single quotes by doubling them
 			if ch == '\'' {
 				if next == '\'' {
-					b.WriteByte(next)
+					_ = b.WriteByte(next)
 					i++
 					continue
 				}
@@ -684,10 +684,10 @@ func splitSQLStatements(content string) []string {
 			continue
 		}
 		if inDoubleQuote {
-			b.WriteByte(ch)
+			_ = b.WriteByte(ch)
 			if ch == '"' {
 				if next == '"' {
-					b.WriteByte(next)
+					_ = b.WriteByte(next)
 					i++
 					continue
 				}
@@ -698,26 +698,26 @@ func splitSQLStatements(content string) []string {
 
 		// entering comment / string / identifier
 		if ch == '-' && next == '-' {
-			b.WriteByte(ch)
-			b.WriteByte(next)
+			_ = b.WriteByte(ch)
+			_ = b.WriteByte(next)
 			i++
 			inLineComment = true
 			continue
 		}
 		if ch == '/' && next == '*' {
-			b.WriteByte(ch)
-			b.WriteByte(next)
+			_ = b.WriteByte(ch)
+			_ = b.WriteByte(next)
 			i++
 			inBlockComment = true
 			continue
 		}
 		if ch == '\'' {
-			b.WriteByte(ch)
+			_ = b.WriteByte(ch)
 			inSingleQuote = true
 			continue
 		}
 		if ch == '"' {
-			b.WriteByte(ch)
+			_ = b.WriteByte(ch)
 			inDoubleQuote = true
 			continue
 		}
@@ -726,7 +726,7 @@ func splitSQLStatements(content string) []string {
 			flush()
 			continue
 		}
-		b.WriteByte(ch)
+		_ = b.WriteByte(ch)
 	}
 	flush()
 	return out

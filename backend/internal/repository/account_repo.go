@@ -3243,17 +3243,6 @@ func copyJSONMap(in map[string]any) map[string]any {
 	return out
 }
 
-func joinClauses(clauses []string, sep string) string {
-	if len(clauses) == 0 {
-		return ""
-	}
-	out := clauses[0]
-	for i := 1; i < len(clauses); i++ {
-		out += sep + clauses[i]
-	}
-	return out
-}
-
 func itoa(v int) string {
 	return strconv.Itoa(v)
 }
