@@ -7,10 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/sysutil"
 
 	"github.com/gin-gonic/gin"
 )
@@ -19,7 +17,7 @@ import (
 var installMutex sync.Mutex
 
 // RegisterRoutes registers setup wizard routes
-func RegisterRoutes(r *gin.Engine) {
+func RegisterRoutes(r *gin.Engine, onInstallComplete func()) {
 	setup := r.Group("/setup")
 	{
 		// Status endpoint is always accessible (read-only)
@@ -31,7 +29,9 @@ func RegisterRoutes(r *gin.Engine) {
 		{
 			protected.POST("/test-db", testDatabase)
 			protected.POST("/test-redis", testRedis)
-			protected.POST("/install", install)
+			protected.POST("/install", func(c *gin.Context) {
+				install(c, onInstallComplete)
+			})
 		}
 	}
 }
@@ -199,7 +199,7 @@ type InstallRequest struct {
 }
 
 // install performs the installation
-func install(c *gin.Context) {
+func install(c *gin.Context, onInstallComplete func()) {
 	// TOCTOU Protection: Acquire mutex to prevent concurrent installation
 	installMutex.Lock()
 	defer installMutex.Unlock()
@@ -295,16 +295,11 @@ func install(c *gin.Context) {
 		return
 	}
 
-	// Schedule service restart in background after sending response
-	// This ensures the client receives the success response before the service restarts
-	go func() {
-		// Wait a moment to ensure the response is sent
-		time.Sleep(500 * time.Millisecond)
-		sysutil.RestartServiceAsync()
-	}()
-
 	response.Success(c, gin.H{
 		"message": "Installation completed successfully. Service will restart automatically.",
 		"restart": true,
 	})
+	if onInstallComplete != nil {
+		onInstallComplete()
+	}
 }

@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -85,7 +86,9 @@ func main() {
 			// Continue to main server after auto-setup
 		} else {
 			log.Println("First run detected, starting setup wizard...")
-			runSetupServer()
+			if runSetupServer() {
+				runMainServer()
+			}
 			return
 		}
 	}
@@ -94,14 +97,30 @@ func main() {
 	runMainServer()
 }
 
-func runSetupServer() {
+type setupCompletion struct {
+	once sync.Once
+	done chan struct{}
+}
+
+func newSetupCompletion() *setupCompletion {
+	return &setupCompletion{done: make(chan struct{})}
+}
+
+func (c *setupCompletion) notify() {
+	c.once.Do(func() {
+		close(c.done)
+	})
+}
+
+func runSetupServer() bool {
 	r := gin.New()
 	r.Use(middleware.Recovery())
 	r.Use(middleware.CORS(config.CORSConfig{}))
 	r.Use(middleware.SecurityHeaders(config.CSPConfig{Enabled: true, Policy: config.DefaultCSPPolicy}, nil))
 
 	// Register setup routes
-	setup.RegisterRoutes(r)
+	completion := newSetupCompletion()
+	setup.RegisterRoutes(r, completion.notify)
 
 	// Serve embedded frontend if available
 	if web.HasEmbeddedFrontend() {
@@ -126,8 +145,30 @@ func runSetupServer() {
 		Protocols:         protocols,
 	}
 
-	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Fatalf("Failed to start setup server: %v", err)
+	serverErr := make(chan error, 1)
+	go func() {
+		serverErr <- server.ListenAndServe()
+	}()
+
+	return waitForSetupCompletion(server, completion.done, serverErr)
+}
+
+func waitForSetupCompletion(server *http.Server, completed <-chan struct{}, serverErr <-chan error) bool {
+	select {
+	case <-completed:
+		log.Println("Setup completed, starting normal server...")
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := server.Shutdown(ctx); err != nil {
+			log.Printf("Failed to stop setup server: %v", err)
+			return false
+		}
+		return true
+	case err := <-serverErr:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("Failed to start setup server: %v", err)
+		}
+		return false
 	}
 }
 
