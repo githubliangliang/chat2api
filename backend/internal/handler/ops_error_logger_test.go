@@ -350,6 +350,40 @@ func TestLogOpsStreamError_UpstreamFailureCountsTowardsSLA(t *testing.T) {
 	require.Contains(t, job.entry.ErrorBody, service.OpenAIUpstreamHTTP2StreamErrorCode)
 }
 
+// A terminal upstream failure can arrive after the downstream response has
+// already been committed (HTTP 200 for SSE or 101 for WebSocket).  The admin
+// request-error list must still see it as a failed request, so the persisted
+// status needs to use the intended client status rather than the wire status.
+func TestOpsErrorLoggerMiddleware_TerminalUpstreamFailureUsesIntendedStatus(t *testing.T) {
+	setupOpsErrorLogTestQueue(t, 4)
+
+	gin.SetMode(gin.TestMode)
+	ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	router := gin.New()
+	router.Use(OpsErrorLoggerMiddleware(ops))
+	router.GET("/backend-api/codex/responses", func(c *gin.Context) {
+		c.Set(opsModelKey, "gpt-5.6-sol")
+		service.SetOpsUpstreamError(c, http.StatusTooManyRequests, "upstream rate limit exceeded", "")
+		service.MarkOpsStreamFailure(c, "rate_limit_error", "", "Upstream rate limit exceeded, please retry later", http.StatusTooManyRequests)
+		c.Status(http.StatusSwitchingProtocols)
+	})
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/backend-api/codex/responses", nil))
+
+	require.Equal(t, http.StatusSwitchingProtocols, recorder.Code)
+	job := <-opsErrorLogQueue
+	require.NotNil(t, job.entry)
+	require.Equal(t, http.StatusTooManyRequests, job.entry.StatusCode,
+		"terminal upstream failure must be visible to the admin error list")
+	require.NotNil(t, job.entry.UpstreamStatusCode)
+	require.Equal(t, http.StatusTooManyRequests, *job.entry.UpstreamStatusCode)
+	require.Equal(t, "upstream", job.entry.ErrorPhase)
+	require.False(t, job.entry.IsBusinessLimited)
+	require.Contains(t, job.entry.ErrorMessage, "Upstream request failed 429")
+	require.NotContains(t, job.entry.ErrorMessage, "Recovered")
+}
+
 // 未标记流内错误时 logOpsStreamError 必须是 no-op（不误记正常的 200 流）。
 func TestLogOpsStreamError_NoopWhenNotMarked(t *testing.T) {
 	setupOpsErrorLogTestQueue(t, 4)

@@ -115,6 +115,45 @@ func TestInferenceFailoverExhaustionRestoresRetryAfter(t *testing.T) {
 	require.Equal(t, "17", recorder.Header().Get("Retry-After"))
 }
 
+func TestOpenAIWSFailoverExhaustionMarksTerminalOpsUpstreamFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/backend-api/codex/responses", nil)
+
+	closeOpenAIWSFailoverExhausted(c, nil, &service.UpstreamFailoverError{
+		StatusCode:   http.StatusTooManyRequests,
+		ResponseBody: []byte(`{"error":{"message":"rate limit reached"}}`),
+	})
+
+	require.Equal(t, http.StatusTooManyRequests, c.GetInt(service.OpsUpstreamStatusCodeKey))
+	streamErr, ok := service.GetOpsStreamError(c)
+	require.True(t, ok)
+	require.True(t, streamErr.CountTowardsSLA)
+	require.Equal(t, http.StatusTooManyRequests, streamErr.IntendedStatus)
+	require.Equal(t, "rate_limit_error", streamErr.ErrType)
+}
+
+func TestInferenceFailoverExhaustionMarksTerminalStreamingFailureForOps(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/backend-api/codex/responses", nil)
+	h := &OpenAIGatewayHandler{}
+
+	h.handleFailoverExhausted(c, &service.UpstreamFailoverError{
+		StatusCode:   http.StatusTooManyRequests,
+		ResponseBody: []byte(`{"error":{"message":"rate limit reached"}}`),
+	}, true)
+
+	streamErr, ok := service.GetOpsStreamError(c)
+	require.True(t, ok)
+	require.True(t, streamErr.CountTowardsSLA)
+	require.Equal(t, http.StatusTooManyRequests, streamErr.IntendedStatus)
+	require.Equal(t, "rate_limit_error", streamErr.ErrType)
+	require.Contains(t, recorder.Body.String(), `"type":"response.failed"`)
+}
+
 func TestFailoverExhaustionRejectsSecretBearingRetryAfter(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()

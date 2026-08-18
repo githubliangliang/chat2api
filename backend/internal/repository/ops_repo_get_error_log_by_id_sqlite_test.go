@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/http"
 	"testing"
 	"time"
 
@@ -133,6 +134,20 @@ func TestOpsRequestErrorQueries_SQLite_NoPostgresOnlySyntax(t *testing.T) {
 	require.NoError(t, err)
 	require.Positive(t, upstreamErrorID)
 
+	upstreamStatus := 429
+	terminalStreamErrorID, err := repo.InsertErrorLog(ctx, &service.OpsInsertErrorLogInput{
+		RequestID:          "request-terminal-stream-429",
+		ErrorPhase:         "upstream",
+		ErrorType:          "upstream_error",
+		ErrorOwner:         "provider",
+		Severity:           "P1",
+		StatusCode:         429,
+		UpstreamStatusCode: &upstreamStatus,
+		CreatedAt:          createdAt,
+	})
+	require.NoError(t, err)
+	require.Positive(t, terminalStreamErrorID)
+
 	startTime := createdAt.Add(-time.Hour)
 	endTime := createdAt.Add(time.Hour)
 	list, err := repo.ListErrorLogs(ctx, &service.OpsErrorLogFilter{
@@ -150,6 +165,20 @@ func TestOpsRequestErrorQueries_SQLite_NoPostgresOnlySyntax(t *testing.T) {
 	require.Equal(t, 1, list.Total)
 	require.Len(t, list.Errors, 1)
 	require.Equal(t, upstreamErrorID, list.Errors[0].ID)
+
+	adminList, err := repo.ListErrorLogs(ctx, &service.OpsErrorLogFilter{
+		Page:      1,
+		PageSize:  100,
+		StartTime: &startTime,
+		EndTime:   &endTime,
+		View:      "all",
+		RequestID: "request-terminal-stream-429",
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, adminList.Total)
+	require.Len(t, adminList.Errors, 1)
+	require.Equal(t, terminalStreamErrorID, adminList.Errors[0].ID)
+	require.Equal(t, http.StatusTooManyRequests, adminList.Errors[0].StatusCode)
 
 	upstreamDetail, err := repo.GetErrorLogByID(ctx, upstreamErrorID)
 	require.NoError(t, err)

@@ -751,6 +751,8 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 				logOpsStreamError(c, ops, status)
 				return
 			}
+			streamErr, hasStreamErr := service.GetOpsStreamError(c)
+			terminalStreamFailure := hasStreamErr && streamErr.CountTowardsSLA && streamErr.IntendedStatus >= 400
 
 			apiKey := getOpsAPIKey(c)
 			clientRequestID, _ := c.Request.Context().Value(ctxkey.ClientRequestID).(string)
@@ -861,8 +863,17 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 
 			recoveredMsg := "Recovered upstream error"
 			if finalAccountAuth {
-				recoveredMsg = "Recovered account authentication failure"
+				if terminalStreamFailure {
+					recoveredMsg = "Account authentication failed"
+				} else {
+					recoveredMsg = "Recovered account authentication failure"
+				}
+			} else if terminalStreamFailure {
+				recoveredMsg = "Upstream request failed"
 			} else if effectiveUpstreamStatus > 0 {
+				recoveredMsg += " " + strconvItoa(effectiveUpstreamStatus)
+			}
+			if terminalStreamFailure && effectiveUpstreamStatus > 0 {
 				recoveredMsg += " " + strconvItoa(effectiveUpstreamStatus)
 			}
 			if upstreamErrorMessage != nil && strings.TrimSpace(*upstreamErrorMessage) != "" {
@@ -872,6 +883,14 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 			recoveredPhase, recoveredBusinessLimited, recoveredOwner, recoveredSource := classifyOpsErrorLog(
 				c, "upstream_error", recoveredMsg, "", effectiveUpstreamStatus,
 			)
+
+			recordedStatus := status
+			if terminalStreamFailure {
+				// Once an SSE/WebSocket response is committed, the wire status is
+				// 200/101 even when the request ultimately fails. Persist the
+				// intended client status so the admin request-error list can find it.
+				recordedStatus = streamErr.IntendedStatus
+			}
 
 			entry := &service.OpsInsertErrorLogInput{
 				RequestID:       requestID,
@@ -916,7 +935,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 				ErrorType:  "upstream_error",
 				// Severity should reflect the upstream failure, not the final client status (200).
 				Severity:          classifyOpsSeverity("upstream_error", effectiveUpstreamStatus),
-				StatusCode:        status,
+				StatusCode:        recordedStatus,
 				IsBusinessLimited: recoveredBusinessLimited,
 				IsCountTokens:     isCountTokensRequest(c),
 
