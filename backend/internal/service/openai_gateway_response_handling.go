@@ -24,6 +24,7 @@ import (
 // openaiStreamingResult streaming response result
 type openaiStreamingResult struct {
 	usage            *OpenAIUsage
+	serviceTier      *string
 	firstTokenMs     *int
 	responseID       string
 	imageCount       int
@@ -35,6 +36,7 @@ type openaiStreamingResult struct {
 type openaiNonStreamingResult struct {
 	*OpenAIUsage
 	usage            *OpenAIUsage
+	serviceTier      *string
 	responseID       string
 	imageCount       int
 	imageOutputSizes []string
@@ -325,12 +327,14 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	streamImageOutputs := make([]json.RawMessage, 0, 1)
 	streamSeenImages := make(map[string]struct{})
 	searchCounter := 0
+	var providerServiceTier *string
 	// Dedup search tool calls across SSE events (item.done + response.completed
 	// both list the same call_id — counting both would ~2× the surcharge).
 	streamSearchSeen := make(map[string]struct{})
 	resultWithUsage := func() *openaiStreamingResult {
 		return &openaiStreamingResult{
 			usage:            usage,
+			serviceTier:      providerServiceTier,
 			firstTokenMs:     firstTokenMs,
 			responseID:       responseID,
 			imageCount:       imageCounter.Count(),
@@ -446,6 +450,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		// Extract data from SSE line (supports both "data: " and "data:" formats)
 		if data, ok := extractOpenAISSEDataLine(line); ok {
 			dataBytes := []byte(data)
+			if tier := extractOpenAIResponseServiceTierFromJSONBytes(dataBytes); tier != nil {
+				providerServiceTier = tier
+			}
 			eventTypeRaw := gjson.GetBytes(dataBytes, "type").String()
 			eventType := strings.TrimSpace(eventTypeRaw)
 			observer.ObserveOpenAI(dataBytes, eventTypeRaw)
@@ -1072,6 +1079,38 @@ func extractOpenAIUsageFromJSONBytes(body []byte) (OpenAIUsage, bool) {
 	return OpenAIUsage{}, false
 }
 
+// extractOpenAIResponseServiceTierFromJSONBytes returns the tier actually
+// declared by the upstream response. Compatible providers may ignore a
+// requested priority/flex tier and explicitly report "default" instead;
+// billing must follow that provider declaration when it is present.
+func extractOpenAIResponseServiceTierFromJSONBytes(body []byte) *string {
+	if len(body) == 0 || !gjson.ValidBytes(body) {
+		return nil
+	}
+	for _, path := range []string{
+		"service_tier",
+		"response.service_tier",
+		"data.service_tier",
+		"data.response.service_tier",
+	} {
+		raw := strings.TrimSpace(gjson.GetBytes(body, path).String())
+		if raw == "" {
+			continue
+		}
+		if normalized := normalizeOpenAIServiceTier(raw); normalized != nil {
+			return normalized
+		}
+	}
+	return nil
+}
+
+func firstNonNilServiceTier(provider, requested *string) *string {
+	if provider != nil {
+		return provider
+	}
+	return requested
+}
+
 // openAIResponsesCompletedEventIsEmpty reports whether a response.completed /
 // response.done SSE payload carries no usage, no error and no output items.
 // The accumulated usage is consulted too, because OpenAI may deliver usage on
@@ -1305,6 +1344,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 	return &openaiNonStreamingResult{
 		OpenAIUsage:      usage,
 		usage:            usage,
+		serviceTier:      extractOpenAIResponseServiceTierFromJSONBytes(body),
 		responseID:       extractOpenAIResponseIDFromJSONBytes(body),
 		imageCount:       countOpenAIResponseImageOutputsFromJSONBytes(body),
 		imageOutputSizes: collectOpenAIResponseImageOutputSizesFromJSONBytes(body),
@@ -1403,6 +1443,7 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 	return &openaiNonStreamingResult{
 		OpenAIUsage:      usage,
 		usage:            usage,
+		serviceTier:      extractOpenAIResponseServiceTierFromJSONBytes(body),
 		responseID:       extractOpenAIResponseIDFromJSONBytes(body),
 		imageCount:       countOpenAIImageOutputsFromSSEBody(bodyText),
 		imageOutputSizes: collectOpenAIImageOutputSizesFromSSEBody(bodyText),

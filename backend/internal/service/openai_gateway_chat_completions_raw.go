@@ -271,6 +271,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	clientOutputStarted := false
 	pendingLines := make([]string, 0, 8)
 	refusalDetector := newOpenAIChatSilentRefusalDetector(requestBodyLen)
+	var providerServiceTier *string
 
 	writeLine := func(line string) {
 		if clientDisconnected {
@@ -310,6 +311,9 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		if payload, ok := extractOpenAISSEDataLine(line); ok {
 			trimmedPayload := strings.TrimSpace(payload)
 			if trimmedPayload != "[DONE]" {
+				if tier := extractOpenAIResponseServiceTierFromJSONBytes([]byte(payload)); tier != nil {
+					providerServiceTier = tier
+				}
 				observer.ObserveOpenAI([]byte(payload), strings.TrimSpace(gjson.Get(payload, "type").String()))
 				usageOnlyChunk := isOpenAIChatUsageOnlyStreamChunk(payload)
 				if u := extractCCStreamUsage(payload); u != nil {
@@ -373,7 +377,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		UpstreamResponseModel:         observedUpstreamResponseModel(c),
 		UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
 		ReasoningEffort:               reasoningEffort,
-		ServiceTier:                   serviceTier,
+		ServiceTier:                   firstNonNilServiceTier(providerServiceTier, serviceTier),
 		Stream:                        true,
 		Duration:                      time.Since(startTime),
 		FirstTokenMs:                  firstTokenMs,
@@ -473,7 +477,7 @@ func (s *OpenAIGatewayService) bufferRawChatCompletions(
 		UpstreamResponseModel:         observedUpstreamResponseModel(c),
 		UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
 		ReasoningEffort:               reasoningEffort,
-		ServiceTier:                   serviceTier,
+		ServiceTier:                   firstNonNilServiceTier(extractOpenAIResponseServiceTierFromJSONBytes(respBody), serviceTier),
 		Stream:                        false,
 		Duration:                      time.Since(startTime),
 	}, nil

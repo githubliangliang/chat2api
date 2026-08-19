@@ -279,6 +279,9 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			return nil, err
 		}
 		usage = result.usage
+		if result.serviceTier != nil {
+			serviceTier = result.serviceTier
+		}
 		firstTokenMs = result.firstTokenMs
 		responseID = strings.TrimSpace(result.responseID)
 		imageCount = result.imageCount
@@ -289,6 +292,9 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			return nil, err
 		}
 		usage = result.usage
+		if result.serviceTier != nil {
+			serviceTier = result.serviceTier
+		}
 		responseID = strings.TrimSpace(result.responseID)
 		imageCount = result.imageCount
 		imageOutputSizes = result.imageOutputSizes
@@ -802,6 +808,7 @@ func collectOpenAIPassthroughTimeoutHeaders(h http.Header) []string {
 
 type openaiStreamingResultPassthrough struct {
 	usage            *OpenAIUsage
+	serviceTier      *string
 	firstTokenMs     *int
 	responseID       string
 	imageCount       int
@@ -811,6 +818,7 @@ type openaiStreamingResultPassthrough struct {
 type openaiNonStreamingResultPassthrough struct {
 	*OpenAIUsage
 	usage            *OpenAIUsage
+	serviceTier      *string
 	responseID       string
 	imageCount       int
 	imageOutputSizes []string
@@ -1306,9 +1314,11 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	documentScanner := newOpenAISSEJSONDocumentScanner(scanner)
 
 	needModelReplace := strings.TrimSpace(originalModel) != "" && strings.TrimSpace(mappedModel) != "" && strings.TrimSpace(originalModel) != strings.TrimSpace(mappedModel)
+	var providerServiceTier *string
 	resultWithUsage := func() *openaiStreamingResultPassthrough {
 		return &openaiStreamingResultPassthrough{
 			usage:            usage,
+			serviceTier:      providerServiceTier,
 			firstTokenMs:     firstTokenMs,
 			responseID:       responseID,
 			imageCount:       imageCounter.Count(),
@@ -1322,6 +1332,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 		forceFlushFailedEvent := false
 		if data, ok := extractOpenAISSEDataLine(line); ok {
 			dataBytes := []byte(data)
+			if tier := extractOpenAIResponseServiceTierFromJSONBytes(dataBytes); tier != nil {
+				providerServiceTier = tier
+			}
 			trimmedData := strings.TrimSpace(data)
 			rawEventType := strings.TrimSpace(gjson.GetBytes(dataBytes, "type").String())
 			observer.ObserveOpenAI(dataBytes, rawEventType)
@@ -1573,6 +1586,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 	return &openaiNonStreamingResultPassthrough{
 		OpenAIUsage:      usage,
 		usage:            usage,
+		serviceTier:      extractOpenAIResponseServiceTierFromJSONBytes(body),
 		responseID:       extractOpenAIResponseIDFromJSONBytes(body),
 		imageCount:       countOpenAIResponseImageOutputsFromJSONBytes(body),
 		imageOutputSizes: collectOpenAIResponseImageOutputSizesFromJSONBytes(body),
@@ -1645,6 +1659,7 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c
 	return &openaiNonStreamingResultPassthrough{
 		OpenAIUsage:      usage,
 		usage:            usage,
+		serviceTier:      extractOpenAIResponseServiceTierFromJSONBytes(body),
 		responseID:       extractOpenAIResponseIDFromJSONBytes(body),
 		imageCount:       countOpenAIImageOutputsFromSSEBody(bodyText),
 		imageOutputSizes: collectOpenAIImageOutputSizesFromSSEBody(bodyText),

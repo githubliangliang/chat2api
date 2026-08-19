@@ -45,6 +45,9 @@ func partialOpenAIStreamResult(c *gin.Context, resp *http.Response, account *Acc
 		FirstTokenMs:                  streamResult.firstTokenMs,
 		ClientDisconnect:              streamResult.clientDisconnect,
 	}
+	if streamResult.serviceTier != nil {
+		result.ServiceTier = streamResult.serviceTier
+	}
 	return result
 }
 
@@ -999,6 +1002,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				return nil, err
 			}
 			usage = streamResult.usage
+			if streamResult.serviceTier != nil {
+				serviceTier = streamResult.serviceTier
+			}
 			firstTokenMs = streamResult.firstTokenMs
 			responseID = strings.TrimSpace(streamResult.responseID)
 			imageCount = streamResult.imageCount
@@ -1010,6 +1016,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				return nil, err
 			}
 			usage = nonStreamResult.usage
+			if nonStreamResult.serviceTier != nil {
+				serviceTier = nonStreamResult.serviceTier
+			}
 			responseID = strings.TrimSpace(nonStreamResult.responseID)
 			imageCount = nonStreamResult.imageCount
 			imageOutputSizes = nonStreamResult.imageOutputSizes
