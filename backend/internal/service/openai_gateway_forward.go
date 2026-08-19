@@ -17,6 +17,37 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+// partialOpenAIStreamResult converts usage observed before a non-failover stream
+// error into a billable result. Failover errors must keep result=nil so a later
+// account attempt is the only one that gets charged.
+func partialOpenAIStreamResult(c *gin.Context, resp *http.Response, account *Account, streamResult *openaiStreamingResult, model, upstreamModel string, startTime time.Time, err error) *OpenAIForwardResult {
+	if streamResult == nil || streamResult.usage == nil {
+		return nil
+	}
+	var failoverErr *UpstreamFailoverError
+	if errors.As(err, &failoverErr) {
+		return nil
+	}
+	usage := *streamResult.usage
+	if usage.InputTokens == 0 && usage.OutputTokens == 0 && usage.CacheCreationInputTokens == 0 && usage.CacheReadInputTokens == 0 && usage.ImageInputTokens == 0 && usage.ImageOutputTokens == 0 {
+		return nil
+	}
+	result := &OpenAIForwardResult{
+		RequestID:                     resp.Header.Get("x-request-id"),
+		ResponseID:                    streamResult.responseID,
+		Usage:                         usage,
+		Model:                         model,
+		UpstreamModel:                 upstreamModel,
+		UpstreamResponseModel:         observedUpstreamResponseModel(c),
+		UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
+		Stream:                        true,
+		Duration:                      time.Since(startTime),
+		FirstTokenMs:                  streamResult.firstTokenMs,
+		ClientDisconnect:              streamResult.clientDisconnect,
+	}
+	return result
+}
+
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
 	beginUpstreamResponseModelObservation(c)
@@ -962,6 +993,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if reqStream {
 			streamResult, err := s.handleStreamingResponseWithReasoning(ctx, resp, c, account, startTime, originalModel, upstreamModel, reasoningEffortValue)
 			if err != nil {
+				if partial := partialOpenAIStreamResult(c, resp, account, streamResult, originalModel, upstreamModel, startTime, err); partial != nil {
+					return partial, err
+				}
 				return nil, err
 			}
 			usage = streamResult.usage

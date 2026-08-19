@@ -227,6 +227,9 @@ type OpenAIUsage struct {
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
 	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
 	ImageOutputTokens        int `json:"image_output_tokens,omitempty"`
+	// ProviderCostUSD is an authoritative per-request provider charge when the
+	// upstream exposes one (currently xAI Responses/Chat usage).
+	ProviderCostUSD *float64 `json:"-"`
 }
 
 // OpenAIForwardResult represents the result of forwarding

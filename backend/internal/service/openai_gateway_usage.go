@@ -240,6 +240,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		).Warn("openai_usage.pricing_missing_record_zero_cost", zap.Error(err))
 		cost = &CostBreakdown{BillingMode: string(BillingModeToken)}
 	}
+	if result.Usage.ProviderCostUSD != nil {
+		applyProviderCost(cost, *result.Usage.ProviderCostUSD, multiplier)
+	}
 	// response_model：按上游成功响应自报的模型计费（渠道显式开启才生效）。
 	// 采纳条件见 responseModelBillingDeclaration + hasIdentifiedOpenAIResponsePricing
 	// + responseModelBillingAdoptable。任一条件不满足都静默回落基线，即开启本模式前的

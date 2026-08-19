@@ -82,6 +82,23 @@ func TestExtractOpenAIUsageFromJSONBytes_NoToolUsageUnchanged(t *testing.T) {
 	assert.Equal(t, 0, usage.ImageInputTokens, "no image tokens without tool_usage")
 }
 
+func TestExtractOpenAIUsageFromJSONBytes_ParsesXAIProviderCost(t *testing.T) {
+	body := []byte(`{
+		"usage": {
+			"input_tokens": 212,
+			"output_tokens": 264,
+			"input_tokens_details": {"cached_tokens": 128},
+			"cost_in_usd_ticks": 6087360
+		}
+	}`)
+
+	usage, ok := extractOpenAIUsageFromJSONBytes(body)
+
+	assert.True(t, ok)
+	assert.NotNil(t, usage.ProviderCostUSD)
+	assert.InDelta(t, 0.000608736, *usage.ProviderCostUSD, 1e-12)
+}
+
 func TestExtractOpenAIUsageFromJSONBytes_BaseUsageHasImageTokensNoOverride(t *testing.T) {
 	// If base usage already has image tokens (e.g. from output_tokens_details),
 	// tool_usage should NOT override them.

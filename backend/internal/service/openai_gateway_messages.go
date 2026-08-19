@@ -1267,6 +1267,13 @@ func copyOpenAIUsageFromResponsesUsage(usage *apicompat.ResponsesUsage) OpenAIUs
 		OutputTokens:             usage.OutputTokens,
 		CacheCreationInputTokens: usage.CacheCreationInputTokens,
 	}
+	if usage.CostInUSDTicks != nil {
+		cost := float64(*usage.CostInUSDTicks) / 10_000_000_000
+		result.ProviderCostUSD = &cost
+	} else if usage.CostInNanoUSD != nil {
+		cost := float64(*usage.CostInNanoUSD) / 1_000_000_000
+		result.ProviderCostUSD = &cost
+	}
 	if usage.InputTokensDetails != nil {
 		result.CacheReadInputTokens = usage.InputTokensDetails.CachedTokens
 	}

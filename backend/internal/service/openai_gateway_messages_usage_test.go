@@ -26,3 +26,17 @@ func TestCopyOpenAIUsageFromResponsesUsageTrustsCanonicalCacheCreationValue(t *t
 	require.Equal(t, 3, got.CacheReadInputTokens)
 	require.Zero(t, got.CacheCreationInputTokens)
 }
+
+func TestCopyOpenAIUsageFromResponsesUsagePreservesProviderCost(t *testing.T) {
+	costTicks := int64(6_087_360)
+	usage := &apicompat.ResponsesUsage{
+		InputTokens:    212,
+		OutputTokens:   264,
+		CostInUSDTicks: &costTicks,
+	}
+
+	got := copyOpenAIUsageFromResponsesUsage(usage)
+
+	require.NotNil(t, got.ProviderCostUSD)
+	require.InDelta(t, 0.000608736, *got.ProviderCostUSD, 1e-12)
+}

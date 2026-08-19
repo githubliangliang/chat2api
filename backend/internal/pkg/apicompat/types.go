@@ -482,6 +482,10 @@ type ResponsesUsage struct {
 	OutputTokens             int `json:"output_tokens"`
 	TotalTokens              int `json:"total_tokens"`
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
+	// xAI Responses usage reports the authoritative per-request charge. Ticks
+	// are preferred; nano-USD is retained for compatible response variants.
+	CostInUSDTicks *int64 `json:"cost_in_usd_ticks,omitempty"`
+	CostInNanoUSD  *int64 `json:"cost_in_nano_usd,omitempty"`
 
 	// Optional detailed breakdown
 	InputTokensDetails  *ResponsesInputTokensDetails  `json:"input_tokens_details,omitempty"`

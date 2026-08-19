@@ -29,6 +29,7 @@ type openaiStreamingResult struct {
 	imageCount       int
 	imageOutputSizes []string
 	searchCount      int
+	clientDisconnect bool
 }
 
 type openaiNonStreamingResult struct {
@@ -335,6 +336,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			imageCount:       imageCounter.Count(),
 			imageOutputSizes: imageCounter.Sizes(),
 			searchCount:      searchCounter,
+			clientDisconnect: clientDisconnected,
 		}
 	}
 	flushPending := func(disconnectMessage string) {
@@ -1164,14 +1166,22 @@ func openAIUsageFromGJSON(value gjson.Result) (OpenAIUsage, bool) {
 		value.Get("input_tokens_details.image_tokens"),
 		value.Get("prompt_tokens_details.image_tokens"),
 	)
-	return OpenAIUsage{
+	usage := OpenAIUsage{
 		InputTokens:              int(inputTokens),
 		ImageInputTokens:         imageInputTokens,
 		OutputTokens:             int(outputTokens),
 		CacheCreationInputTokens: cacheCreationTokens,
 		CacheReadInputTokens:     cacheReadTokens,
 		ImageOutputTokens:        int(imageOutputTokens),
-	}, true
+	}
+	if ticks := value.Get("cost_in_usd_ticks"); ticks.Exists() && ticks.Type == gjson.Number {
+		cost := float64(ticks.Int()) / 10_000_000_000
+		usage.ProviderCostUSD = &cost
+	} else if nano := value.Get("cost_in_nano_usd"); nano.Exists() && nano.Type == gjson.Number {
+		cost := float64(nano.Int()) / 1_000_000_000
+		usage.ProviderCostUSD = &cost
+	}
+	return usage, true
 }
 
 func openAICacheReadTokensFromUsage(value gjson.Result) int {
