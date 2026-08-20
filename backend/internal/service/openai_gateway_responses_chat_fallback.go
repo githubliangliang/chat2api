@@ -80,9 +80,9 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 		}
 		return nil, err
 	}
-	if serviceTier == nil {
-		serviceTier = extractOpenAIServiceTierFromBody(chatBody)
-	}
+	// The policy may filter or rewrite the tier. Billing must fall back to the
+	// exact value sent upstream, not the pre-policy request value.
+	serviceTier = extractOpenAIServiceTierFromBody(chatBody)
 
 	logger.L().Debug("openai responses: forwarding via raw chat completions",
 		zap.Int64("account_id", account.ID),
@@ -112,9 +112,17 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 	}
 
 	if clientStream {
-		return s.streamChatCompletionsAsResponses(c, resp, originalModel, customTools, toolSearch, namespaceTools, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
+		result, streamErr := s.streamChatCompletionsAsResponses(c, resp, originalModel, customTools, toolSearch, namespaceTools, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
+		if result != nil {
+			logOpenAIServiceTierDifference(c, account, result.RequestID, serviceTier, result.ServiceTier)
+		}
+		return result, streamErr
 	}
-	return s.bufferChatCompletionsAsResponses(c, resp, originalModel, customTools, toolSearch, namespaceTools, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
+	result, bufferErr := s.bufferChatCompletionsAsResponses(c, resp, originalModel, customTools, toolSearch, namespaceTools, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
+	if result != nil {
+		logOpenAIServiceTierDifference(c, account, result.RequestID, serviceTier, result.ServiceTier)
+	}
+	return result, bufferErr
 }
 
 func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
@@ -136,6 +144,7 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
 		return nil, err
 	}
 	responsesResp := apicompat.ChatCompletionsResponseToResponses(ccResp, originalModel, customTools, toolSearch, namespaceTools)
+	providerServiceTier := normalizeOpenAIServiceTier(ccResp.ServiceTier)
 
 	if s.responseHeaderFilter != nil {
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
@@ -149,7 +158,7 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
 		BillingModel:    billingModel,
 		UpstreamModel:   upstreamModel,
 		ReasoningEffort: reasoningEffort,
-		ServiceTier:     serviceTier,
+		ServiceTier:     firstNonNilServiceTier(providerServiceTier, serviceTier),
 		Stream:          false,
 		Duration:        time.Since(startTime),
 	}, nil
@@ -208,6 +217,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 	})
 
 	if scan.Err != nil {
+		providerServiceTier := normalizeOpenAIServiceTier(scan.ServiceTier)
 		return &OpenAIForwardResult{
 			RequestID:       requestID,
 			Usage:           scan.Usage,
@@ -215,12 +225,13 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 			BillingModel:    billingModel,
 			UpstreamModel:   upstreamModel,
 			ReasoningEffort: reasoningEffort,
-			ServiceTier:     serviceTier,
+			ServiceTier:     firstNonNilServiceTier(providerServiceTier, serviceTier),
 			Stream:          true,
 			Duration:        time.Since(startTime),
 			FirstTokenMs:    scan.FirstTokenMs,
 		}, fmt.Errorf("stream usage incomplete: %w", scan.Err)
 	}
+	providerServiceTier := normalizeOpenAIServiceTier(scan.ServiceTier)
 
 	writeEvents(apicompat.FinalizeChatCompletionsResponsesStream(state))
 	if !clientDisconnected {
@@ -243,7 +254,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 		BillingModel:    billingModel,
 		UpstreamModel:   upstreamModel,
 		ReasoningEffort: reasoningEffort,
-		ServiceTier:     serviceTier,
+		ServiceTier:     firstNonNilServiceTier(providerServiceTier, serviceTier),
 		Stream:          true,
 		Duration:        time.Since(startTime),
 		FirstTokenMs:    scan.FirstTokenMs,

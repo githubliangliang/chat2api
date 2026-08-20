@@ -20,7 +20,7 @@ import (
 // partialOpenAIStreamResult converts usage observed before a non-failover stream
 // error into a billable result. Failover errors must keep result=nil so a later
 // account attempt is the only one that gets charged.
-func partialOpenAIStreamResult(c *gin.Context, resp *http.Response, account *Account, streamResult *openaiStreamingResult, model, upstreamModel string, startTime time.Time, err error) *OpenAIForwardResult {
+func partialOpenAIStreamResult(c *gin.Context, resp *http.Response, account *Account, streamResult *openaiStreamingResult, model, upstreamModel string, requestedServiceTier *string, startTime time.Time, err error) *OpenAIForwardResult {
 	if streamResult == nil || streamResult.usage == nil {
 		return nil
 	}
@@ -44,9 +44,7 @@ func partialOpenAIStreamResult(c *gin.Context, resp *http.Response, account *Acc
 		Duration:                      time.Since(startTime),
 		FirstTokenMs:                  streamResult.firstTokenMs,
 		ClientDisconnect:              streamResult.clientDisconnect,
-	}
-	if streamResult.serviceTier != nil {
-		result.ServiceTier = streamResult.serviceTier
+		ServiceTier:                   firstNonNilServiceTier(streamResult.serviceTier, requestedServiceTier),
 	}
 	return result
 }
@@ -983,6 +981,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		defer func() { _ = resp.Body.Close() }()
 
 		serviceTier := extractOpenAIServiceTierFromBody(body)
+		requestedServiceTier := serviceTier
 		// 上游接受后只保留计费需要的标量，避免响应处理期间继续保活完整 input/tools map。
 		reqBody = nil
 
@@ -996,7 +995,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if reqStream {
 			streamResult, err := s.handleStreamingResponseWithReasoning(ctx, resp, c, account, startTime, originalModel, upstreamModel, reasoningEffortValue)
 			if err != nil {
-				if partial := partialOpenAIStreamResult(c, resp, account, streamResult, originalModel, upstreamModel, startTime, err); partial != nil {
+				if partial := partialOpenAIStreamResult(c, resp, account, streamResult, originalModel, upstreamModel, requestedServiceTier, startTime, err); partial != nil {
+					logOpenAIServiceTierDifference(c, account, resp.Header.Get("x-request-id"), requestedServiceTier, partial.ServiceTier)
 					return partial, err
 				}
 				return nil, err
@@ -1037,6 +1037,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if usage == nil {
 			usage = &OpenAIUsage{}
 		}
+		logOpenAIServiceTierDifference(c, account, resp.Header.Get("x-request-id"), requestedServiceTier, serviceTier)
 
 		forwardResult := &OpenAIForwardResult{
 			RequestID:                     resp.Header.Get("x-request-id"),

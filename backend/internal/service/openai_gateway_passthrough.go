@@ -260,6 +260,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	defer func() { _ = resp.Body.Close() }()
 
 	serviceTier := extractOpenAIServiceTierFromBody(body)
+	requestedServiceTier := serviceTier
 
 	// x-codex-turn-state 溯源：下游回传由 writeOpenAIPassthroughResponseHeaders
 	// 在各 handler 的写头点强制放行，铸造账号在此统一记录，供出站守卫剥离
@@ -334,6 +335,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		forwardResult.ImageOutputSizes = imageOutputSizes
 		forwardResult.BillingModel = imageBillingModel
 	}
+	logOpenAIServiceTierDifference(c, account, forwardResult.RequestID, requestedServiceTier, forwardResult.ServiceTier)
 	return forwardResult, nil
 }
 
@@ -1332,8 +1334,10 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 		forceFlushFailedEvent := false
 		if data, ok := extractOpenAISSEDataLine(line); ok {
 			dataBytes := []byte(data)
-			if tier := extractOpenAIResponseServiceTierFromJSONBytes(dataBytes); tier != nil {
-				providerServiceTier = tier
+			if bytes.Contains(dataBytes, []byte("service_tier")) {
+				if tier := extractOpenAIResponseServiceTierFromJSONBytes(dataBytes); tier != nil {
+					providerServiceTier = tier
+				}
 			}
 			trimmedData := strings.TrimSpace(data)
 			rawEventType := strings.TrimSpace(gjson.GetBytes(dataBytes, "type").String())

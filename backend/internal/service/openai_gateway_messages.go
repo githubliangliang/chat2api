@@ -288,6 +288,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 			return nil, fmt.Errorf("apply grok Free function-tool cache route: %w", patchErr)
 		}
 	}
+	requestedServiceTier := extractOpenAIServiceTierFromBody(responsesBody)
 
 	// 5. Get access token
 	token, _, err := s.getRequestCredential(ctx, c, account)
@@ -473,20 +474,20 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	}
 
 	// Propagate ServiceTier and ReasoningEffort to result for billing
-	if handleErr == nil && result != nil {
-		if compatContinuationEnabled && promptCacheKey != "" && result.ResponseID != "" {
-			s.bindOpenAICompatSessionResponseID(ctx, c, account, promptCacheKey, result.ResponseID)
-		}
-		if promptCacheKey != "" && anthropicDigestChain != "" {
-			s.bindOpenAICompatAnthropicDigestPromptCacheKey(account, apiKeyID, anthropicDigestChain, promptCacheKey, anthropicMatchedDigestChain)
-		}
-		if responsesReq.ServiceTier != "" {
-			st := responsesReq.ServiceTier
-			result.ServiceTier = &st
-		}
-		if responsesReq.Reasoning != nil && responsesReq.Reasoning.Effort != "" {
-			re := responsesReq.Reasoning.Effort
-			result.ReasoningEffort = &re
+	if result != nil {
+		result.ServiceTier = firstNonNilServiceTier(result.ServiceTier, requestedServiceTier)
+		logOpenAIServiceTierDifference(c, account, result.RequestID, requestedServiceTier, result.ServiceTier)
+		if handleErr == nil {
+			if compatContinuationEnabled && promptCacheKey != "" && result.ResponseID != "" {
+				s.bindOpenAICompatSessionResponseID(ctx, c, account, promptCacheKey, result.ResponseID)
+			}
+			if promptCacheKey != "" && anthropicDigestChain != "" {
+				s.bindOpenAICompatAnthropicDigestPromptCacheKey(account, apiKeyID, anthropicDigestChain, promptCacheKey, anthropicMatchedDigestChain)
+			}
+			if responsesReq.Reasoning != nil && responsesReq.Reasoning.Effort != "" {
+				re := responsesReq.Reasoning.Effort
+				result.ReasoningEffort = &re
+			}
 		}
 	}
 
@@ -619,6 +620,7 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 		UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
 		Stream:                        false,
 		Duration:                      time.Since(startTime),
+		ServiceTier:                   normalizeOpenAIServiceTier(finalResponse.ServiceTier),
 	}
 	// Grok /v1/messages uses Responses upstream; count native search for surcharge.
 	if account != nil && account.IsGrok() && finalResponse != nil {
@@ -848,6 +850,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	clientOutputStarted := false
 	var streamFailoverErr error
 	var streamNonFailoverErr error
+	var providerServiceTier *string
 	searchCount := 0
 	streamSearchSeen := make(map[string]struct{})
 	countSearch := account != nil && account.IsGrok()
@@ -887,6 +890,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			Duration:                      time.Since(startTime),
 			FirstTokenMs:                  firstTokenMs,
 			ClientDisconnect:              clientDisconnected,
+			ServiceTier:                   providerServiceTier,
 		}
 		if searchCount > 0 {
 			out.SearchCount = searchCount
@@ -918,6 +922,11 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		eventType := strings.TrimSpace(event.Type)
 		isBareErrorEvent := eventType == "error"
 		isTerminalEvent := isOpenAICompatResponsesTerminalEvent(eventType) || isBareErrorEvent
+		if event.Response != nil {
+			if tier := normalizeOpenAIServiceTier(event.Response.ServiceTier); tier != nil {
+				providerServiceTier = tier
+			}
+		}
 		if isTerminalEvent {
 			if event.Response != nil {
 				if id := strings.TrimSpace(event.Response.ID); id != "" {

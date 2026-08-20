@@ -1055,6 +1055,7 @@ func ChatCompletionsResponseToResponses(resp *ChatCompletionsResponse, model str
 	if out.Model == "" {
 		out.Model = resp.Model
 	}
+	out.ServiceTier = resp.ServiceTier
 
 	if len(resp.Choices) > 0 {
 		choice := resp.Choices[0]
@@ -1300,6 +1301,7 @@ type ChatCompletionsToResponsesStreamState struct {
 
 	FinishReason string
 	Usage        *ResponsesUsage
+	ServiceTier  string
 }
 
 // NewChatCompletionsToResponsesStreamState returns an initialized stream state.
@@ -1338,6 +1340,9 @@ func ChatCompletionsChunkToResponsesEvents(
 	}
 	if state.Model == "" && chunk.Model != "" {
 		state.Model = chunk.Model
+	}
+	if tier := strings.TrimSpace(chunk.ServiceTier); tier != "" {
+		state.ServiceTier = tier
 	}
 	if chunk.Usage != nil {
 		state.Usage = ChatUsageToResponsesUsage(chunk.Usage)
@@ -1497,6 +1502,7 @@ func FinalizeChatCompletionsResponsesStream(state *ChatCompletionsToResponsesStr
 			Status:            status,
 			Output:            state.chatOutput(),
 			Usage:             state.Usage,
+			ServiceTier:       state.ServiceTier,
 			IncompleteDetails: incompleteDetails,
 		},
 	}))
@@ -1510,11 +1516,12 @@ func ensureChatToResponsesCreated(state *ChatCompletionsToResponsesStreamState) 
 	state.CreatedSent = true
 	return []ResponsesStreamEvent{chatToResponsesEvent(state, "response.created", &ResponsesStreamEvent{
 		Response: &ResponsesResponse{
-			ID:     state.ResponseID,
-			Object: "response",
-			Model:  state.Model,
-			Status: "in_progress",
-			Output: []ResponsesOutput{},
+			ID:          state.ResponseID,
+			Object:      "response",
+			Model:       state.Model,
+			Status:      "in_progress",
+			Output:      []ResponsesOutput{},
+			ServiceTier: state.ServiceTier,
 		},
 	})}
 }

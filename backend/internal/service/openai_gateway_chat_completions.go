@@ -247,6 +247,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 		return nil, policyErr
 	}
 	responsesBody = updatedBody
+	requestedServiceTier := extractOpenAIServiceTierFromBody(responsesBody)
 
 	// 5. Get access token
 	token, _, err := s.GetAccessToken(ctx, account)
@@ -323,12 +324,10 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	}
 
 	// Propagate ServiceTier and ReasoningEffort to result for billing
-	if handleErr == nil && result != nil {
-		if responsesReq.ServiceTier != "" {
-			st := responsesReq.ServiceTier
-			result.ServiceTier = &st
-		}
-		if responsesReq.Reasoning != nil && responsesReq.Reasoning.Effort != "" {
+	if result != nil {
+		result.ServiceTier = firstNonNilServiceTier(result.ServiceTier, requestedServiceTier)
+		logOpenAIServiceTierDifference(c, account, result.RequestID, requestedServiceTier, result.ServiceTier)
+		if handleErr == nil && responsesReq.Reasoning != nil && responsesReq.Reasoning.Effort != "" {
 			re := responsesReq.Reasoning.Effort
 			result.ReasoningEffort = &re
 		}
@@ -498,6 +497,7 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 		UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
 		Stream:                        false,
 		Duration:                      time.Since(startTime),
+		ServiceTier:                   normalizeOpenAIServiceTier(finalResponse.ServiceTier),
 	}
 	// Grok chat bridge: bill native search tools found in the terminal Responses body.
 	if account != nil && account.IsGrok() && finalResponse != nil {
@@ -540,6 +540,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	refusalDetector := newOpenAIChatSilentRefusalDetector(requestBodyLen)
 	var streamFailoverErr *UpstreamFailoverError
 	var streamNonFailoverErr error
+	var providerServiceTier *string
 	// Grok chat bridge reuses Responses SSE; count native search tools for surcharge.
 	searchCount := 0
 	streamSearchSeen := make(map[string]struct{})
@@ -577,6 +578,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			Stream:                        true,
 			Duration:                      time.Since(startTime),
 			FirstTokenMs:                  firstTokenMs,
+			ServiceTier:                   providerServiceTier,
 		}
 		if searchCount > 0 {
 			out.SearchCount = searchCount
@@ -606,6 +608,11 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		refusalDetector.ObservePayload([]byte(payload))
 
 		isTerminalEvent := isOpenAICompatResponsesTerminalEvent(event.Type)
+		if event.Response != nil {
+			if tier := normalizeOpenAIServiceTier(event.Response.ServiceTier); tier != nil {
+				providerServiceTier = tier
+			}
+		}
 		if isTerminalEvent {
 			if event.Usage != nil {
 				usage = copyOpenAIUsageFromResponsesUsage(event.Usage)

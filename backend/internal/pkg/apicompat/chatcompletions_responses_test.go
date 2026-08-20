@@ -572,6 +572,80 @@ func TestChatCompletionsToResponses_ServiceTier(t *testing.T) {
 	assert.Equal(t, "flex", resp.ServiceTier)
 }
 
+func TestChatCompletionsResponseToResponsesPreservesServiceTier(t *testing.T) {
+	resp := &ChatCompletionsResponse{
+		ID:          "chatcmpl_tier",
+		Model:       "gpt-5.5",
+		ServiceTier: "flex",
+		Choices: []ChatChoice{{
+			Message: ChatMessage{Role: "assistant", Content: json.RawMessage(`"ok"`)},
+		}},
+	}
+
+	converted := ChatCompletionsResponseToResponses(resp, "gpt-5.5", nil, false, nil)
+
+	assert.Equal(t, "flex", converted.ServiceTier)
+}
+
+func TestResponsesToChatCompletionsPreservesServiceTier(t *testing.T) {
+	resp := &ResponsesResponse{
+		ID:          "resp_tier",
+		Model:       "gpt-5.5",
+		Status:      "completed",
+		ServiceTier: "flex",
+		Output: []ResponsesOutput{{
+			Type:    "message",
+			Content: []ResponsesContentPart{{Type: "output_text", Text: "ok"}},
+		}},
+	}
+
+	converted := ResponsesToChatCompletions(resp, "gpt-5.5")
+
+	assert.Equal(t, "flex", converted.ServiceTier)
+}
+
+func TestResponsesEventToChatChunksPreservesLastServiceTier(t *testing.T) {
+	state := NewResponsesEventToChatState()
+	state.IncludeUsage = true
+	created := ResponsesEventToChatChunks(&ResponsesStreamEvent{
+		Type:     "response.created",
+		Response: &ResponsesResponse{ID: "resp_tier_stream", ServiceTier: "priority"},
+	}, state)
+	assert.Len(t, created, 1)
+	assert.Equal(t, "priority", created[0].ServiceTier)
+
+	completed := ResponsesEventToChatChunks(&ResponsesStreamEvent{
+		Type:     "response.completed",
+		Response: &ResponsesResponse{ID: "resp_tier_stream", Status: "completed", ServiceTier: "flex", Usage: &ResponsesUsage{InputTokens: 1, OutputTokens: 1}},
+	}, state)
+	assert.NotEmpty(t, completed)
+	for _, chunk := range completed {
+		assert.Equal(t, "flex", chunk.ServiceTier)
+	}
+}
+
+func TestChatCompletionsChunkToResponsesEventsPreservesLastServiceTier(t *testing.T) {
+	state := NewChatCompletionsToResponsesStreamState("gpt-5.5")
+	created := ChatCompletionsChunkToResponsesEvents(&ChatCompletionsChunk{
+		ID:          "chatcmpl_tier_stream",
+		Model:       "gpt-5.5",
+		ServiceTier: "priority",
+	}, state)
+	require.NotEmpty(t, created)
+	assert.Equal(t, "priority", created[0].Response.ServiceTier)
+
+	ChatCompletionsChunkToResponsesEvents(&ChatCompletionsChunk{
+		ID:          "chatcmpl_tier_stream",
+		Model:       "gpt-5.5",
+		ServiceTier: "flex",
+	}, state)
+	completed := FinalizeChatCompletionsResponsesStream(state)
+	require.NotEmpty(t, completed)
+	terminal := completed[len(completed)-1]
+	require.NotNil(t, terminal.Response)
+	assert.Equal(t, "flex", terminal.Response.ServiceTier)
+}
+
 func TestChatCompletionsToResponses_ParallelToolCalls(t *testing.T) {
 	for _, value := range []bool{false, true} {
 		req := &ChatCompletionsRequest{

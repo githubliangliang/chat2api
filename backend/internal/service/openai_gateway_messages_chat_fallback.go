@@ -124,9 +124,17 @@ func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(
 
 	// 5. Convert response
 	if clientStream {
-		return s.streamChatCompletionsAsAnthropic(c, resp, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
+		result, streamErr := s.streamChatCompletionsAsAnthropic(c, resp, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
+		if result != nil {
+			logOpenAIServiceTierDifference(c, account, result.RequestID, serviceTier, result.ServiceTier)
+		}
+		return result, streamErr
 	}
-	return s.bufferChatCompletionsAsAnthropic(c, resp, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
+	result, bufferErr := s.bufferChatCompletionsAsAnthropic(c, resp, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
+	if result != nil {
+		logOpenAIServiceTierDifference(c, account, result.RequestID, serviceTier, result.ServiceTier)
+	}
+	return result, bufferErr
 }
 
 func (s *OpenAIGatewayService) bufferChatCompletionsAsAnthropic(
@@ -145,6 +153,7 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsAnthropic(
 		return nil, err
 	}
 	anthropicResp := apicompat.ChatCompletionsResponseToAnthropic(ccResp, originalModel)
+	providerServiceTier := normalizeOpenAIServiceTier(ccResp.ServiceTier)
 
 	if s.responseHeaderFilter != nil {
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
@@ -158,7 +167,7 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsAnthropic(
 		BillingModel:    billingModel,
 		UpstreamModel:   upstreamModel,
 		ReasoningEffort: reasoningEffort,
-		ServiceTier:     serviceTier,
+		ServiceTier:     firstNonNilServiceTier(providerServiceTier, serviceTier),
 		Stream:          false,
 		Duration:        time.Since(startTime),
 	}, nil
@@ -218,13 +227,14 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 			BillingModel:     billingModel,
 			UpstreamModel:    upstreamModel,
 			ReasoningEffort:  reasoningEffort,
-			ServiceTier:      serviceTier,
+			ServiceTier:      firstNonNilServiceTier(normalizeOpenAIServiceTier(scan.ServiceTier), serviceTier),
 			Stream:           true,
 			Duration:         time.Since(startTime),
 			FirstTokenMs:     scan.FirstTokenMs,
 			ClientDisconnect: clientDisconnected,
 		}, fmt.Errorf("stream usage incomplete: %w", scan.Err)
 	}
+	providerServiceTier := normalizeOpenAIServiceTier(scan.ServiceTier)
 
 	// Finalize: close open blocks + emit message_delta/message_stop.
 	finalEvents := apicompat.FinalizeChatCompletionsAnthropicStream(anthropicState)
@@ -253,7 +263,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 		BillingModel:     billingModel,
 		UpstreamModel:    upstreamModel,
 		ReasoningEffort:  reasoningEffort,
-		ServiceTier:      serviceTier,
+		ServiceTier:      firstNonNilServiceTier(providerServiceTier, serviceTier),
 		Stream:           true,
 		Duration:         time.Since(startTime),
 		FirstTokenMs:     scan.FirstTokenMs,

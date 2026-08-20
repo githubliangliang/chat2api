@@ -19,6 +19,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
+	"go.uber.org/zap"
 )
 
 // openaiStreamingResult streaming response result
@@ -450,8 +451,10 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		// Extract data from SSE line (supports both "data: " and "data:" formats)
 		if data, ok := extractOpenAISSEDataLine(line); ok {
 			dataBytes := []byte(data)
-			if tier := extractOpenAIResponseServiceTierFromJSONBytes(dataBytes); tier != nil {
-				providerServiceTier = tier
+			if bytes.Contains(dataBytes, []byte("service_tier")) {
+				if tier := extractOpenAIResponseServiceTierFromJSONBytes(dataBytes); tier != nil {
+					providerServiceTier = tier
+				}
 			}
 			eventTypeRaw := gjson.GetBytes(dataBytes, "type").String()
 			eventType := strings.TrimSpace(eventTypeRaw)
@@ -1109,6 +1112,35 @@ func firstNonNilServiceTier(provider, requested *string) *string {
 		return provider
 	}
 	return requested
+}
+
+func logOpenAIServiceTierDifference(c *gin.Context, account *Account, requestID string, requested, provider *string) {
+	if provider == nil {
+		return
+	}
+	requestedValue := ""
+	if requested != nil {
+		requestedValue = strings.TrimSpace(*requested)
+	}
+	providerValue := strings.TrimSpace(*provider)
+	if providerValue == "" || providerValue == requestedValue {
+		return
+	}
+	ctx := context.Background()
+	if c != nil && c.Request != nil {
+		ctx = c.Request.Context()
+	}
+	accountID := int64(0)
+	if account != nil {
+		accountID = account.ID
+	}
+	logger.FromContext(ctx).Info("openai service tier differs from request",
+		zap.String("request_id", strings.TrimSpace(requestID)),
+		zap.Int64("account_id", accountID),
+		zap.String("requested_service_tier", requestedValue),
+		zap.String("provider_service_tier", providerValue),
+		zap.String("final_service_tier", providerValue),
+	)
 }
 
 // openAIResponsesCompletedEventIsEmpty reports whether a response.completed /

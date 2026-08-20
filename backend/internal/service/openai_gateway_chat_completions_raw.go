@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -69,9 +70,6 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	}
 	clientStream := gjson.GetBytes(body, "stream").Bool()
 
-	// 1b. Extract service tier from the raw body before any transformation.
-	serviceTier := extractOpenAIServiceTierFromBody(body)
-
 	// 2. Resolve model mapping (same as ForwardAsChatCompletions)
 	billingModel := resolveOpenAIForwardModel(account, originalModel, defaultMappedModel)
 	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
@@ -105,6 +103,7 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 		return nil, policyErr
 	}
 	upstreamBody = updatedBody
+	serviceTier := extractOpenAIServiceTierFromBody(upstreamBody)
 
 	// Grok Composer does not accept image_url parts directly, but Grok Build
 	// can describe the images first. Bridge only this exact failure mode.
@@ -223,6 +222,7 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	if result != nil {
 		addOpenAIUsage(&result.Usage, bridgeUsage)
 		result.UpstreamEndpoint = grokChatRawEndpoint
+		logOpenAIServiceTierDifference(c, account, result.RequestID, serviceTier, result.ServiceTier)
 	}
 	return result, forwardErr
 }
@@ -309,12 +309,15 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		line := scanner.Text()
 		refusalDetector.ObserveSSELine(line)
 		if payload, ok := extractOpenAISSEDataLine(line); ok {
+			payloadBytes := []byte(payload)
 			trimmedPayload := strings.TrimSpace(payload)
 			if trimmedPayload != "[DONE]" {
-				if tier := extractOpenAIResponseServiceTierFromJSONBytes([]byte(payload)); tier != nil {
-					providerServiceTier = tier
+				if bytes.Contains(payloadBytes, []byte("service_tier")) {
+					if tier := extractOpenAIResponseServiceTierFromJSONBytes(payloadBytes); tier != nil {
+						providerServiceTier = tier
+					}
 				}
-				observer.ObserveOpenAI([]byte(payload), strings.TrimSpace(gjson.Get(payload, "type").String()))
+				observer.ObserveOpenAI(payloadBytes, strings.TrimSpace(gjson.GetBytes(payloadBytes, "type").String()))
 				usageOnlyChunk := isOpenAIChatUsageOnlyStreamChunk(payload)
 				if u := extractCCStreamUsage(payload); u != nil {
 					usage = *u

@@ -24,7 +24,7 @@ func TestPartialOpenAIStreamResultPreservesObservedUsageOnNonFailoverError(t *te
 		responseID:   "resp_partial_1",
 	}
 
-	got := partialOpenAIStreamResult(c, resp, &Account{ID: 30}, stream, "gpt-5.6-sol", "gpt-5.6-sol", start, errors.New("stream usage incomplete: missing terminal event"))
+	got := partialOpenAIStreamResult(c, resp, &Account{ID: 30}, stream, "gpt-5.6-sol", "gpt-5.6-sol", nil, start, errors.New("stream usage incomplete: missing terminal event"))
 
 	require.NotNil(t, got)
 	require.Equal(t, 12, got.Usage.InputTokens)
@@ -40,9 +40,32 @@ func TestPartialOpenAIStreamResultDropsUsageForFailoverError(t *testing.T) {
 	c, _ := gin.CreateTestContext(nil)
 	stream := &openaiStreamingResult{usage: &OpenAIUsage{InputTokens: 12}}
 
-	got := partialOpenAIStreamResult(c, &http.Response{}, &Account{ID: 30}, stream, "model", "model", time.Now(), &UpstreamFailoverError{StatusCode: http.StatusBadGateway})
+	got := partialOpenAIStreamResult(c, &http.Response{}, &Account{ID: 30}, stream, "model", "model", nil, time.Now(), &UpstreamFailoverError{StatusCode: http.StatusBadGateway})
 
 	require.Nil(t, got)
+}
+
+func TestPartialOpenAIStreamResultFallsBackToRequestedServiceTier(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(nil)
+	requestedTier := "flex"
+	stream := &openaiStreamingResult{usage: &OpenAIUsage{InputTokens: 12, OutputTokens: 3}}
+
+	got := partialOpenAIStreamResult(
+		c,
+		&http.Response{Header: http.Header{}},
+		&Account{ID: 30},
+		stream,
+		"model",
+		"model",
+		&requestedTier,
+		time.Now(),
+		errors.New("stream usage incomplete: missing terminal event"),
+	)
+
+	require.NotNil(t, got)
+	require.NotNil(t, got.ServiceTier)
+	require.Equal(t, "flex", *got.ServiceTier)
 }
 
 func partialIntPtr(v int) *int { return &v }
