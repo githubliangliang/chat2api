@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"log"
 	"time"
+
+	// Keep IANA timezone data in single-file releases, including Windows.
+	_ "time/tzdata"
 )
 
 var (

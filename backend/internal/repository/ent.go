@@ -69,11 +69,19 @@ func InitEnt(cfg *config.Config) (*ent.Client, *sql.DB, error) {
 		_ = client.Close()
 		return nil, nil, err
 	}
-
 	// 在密钥补齐后执行完整配置校验，避免空 jwt.secret 导致服务运行时失败。
 	if err := cfg.Validate(); err != nil {
 		_ = client.Close()
 		return nil, nil, fmt.Errorf("validate config after secret bootstrap: %w", err)
+	}
+
+	adminCreated, err := ensureConfiguredAdmin(migrationCtx, client, cfg)
+	if err != nil {
+		_ = client.Close()
+		return nil, nil, err
+	}
+	if adminCreated {
+		logger.LegacyPrintf("repository", "initial admin user created from config: %s", cfg.Default.AdminEmail)
 	}
 
 	// SIMPLE 模式：启动时补齐各平台默认分组。

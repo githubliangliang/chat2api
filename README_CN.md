@@ -649,22 +649,9 @@ Invalid base URL: invalid url scheme: http
 
 #### ⚠️ 重要：创建管理员账号
 
-初始管理员账号**只能通过 setup 向导创建**（首次启动时访问 `http://<host>:8080`）。`config.yaml` 中的 `default.admin_email` / `default.admin_password` 字段**不会被用来创建管理员**——它们只是出于历史原因保留在模板里。
+初始管理员账号可以通过 setup 向导创建，也可以在空数据库首次启动时由 `config.yaml` 中同时填写的 `default.admin_email` / `default.admin_password` 自动创建。已有用户时不会覆盖或重置账号密码。
 
-由于上面第 5 步预先创建了 `config.yaml`，**setup 向导在首次启动时会被跳过**：服务检测到 config 已存在，会直接进入正常模式，此时 `users` 表为空，首次登录会返回 `invalid email or password`。
-
-**创建管理员的两种方式：**
-
-1. **推荐——让向导自动生成 `config.yaml`：** 跳过上面的第 5 步（不要执行 `cp`）。直接运行 `./sub2api`，访问 `http://localhost:8080`，向导会引导你完成数据库、Redis 和管理员账号配置，并自动写出 `config.yaml`。
-
-2. **如果你已经创建了 `config.yaml`：** 首次启动前先把它临时移走以触发向导，完成后再恢复：
-   ```bash
-   mv config.yaml config.yaml.bak
-   ./sub2api        # 向导在 http://localhost:8080 启动，并生成新的 config.yaml
-   # 向导完成后 Ctrl+C 停服，再恢复你的配置：
-   mv config.yaml.bak config.yaml
-   ./sub2api        # 重启进入正常模式，用刚创建的管理员登录
-   ```
+因此可以直接预先复制配置模板并启动服务；如果两个字段已填写且示例密码已替换，程序会在空库中创建管理员。未填写时再访问 `http://<host>:8080/setup` 完成向导。为避免公开示例凭据，`admin123` 和 `CHANGE_ME_STRONG_PASSWORD` 会被拒绝。
 
 ```bash
 # 6. 运行应用
