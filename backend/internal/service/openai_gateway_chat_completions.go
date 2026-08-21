@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -413,7 +414,7 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 
 	finalResponse, usage, acc, err := s.readOpenAICompatBufferedTerminal(resp, "openai chat_completions buffered", requestID)
 	if err != nil {
-		return nil, err
+		return nil, s.newOpenAICompatBufferedReadFailoverError(c, account, resp, requestID, err)
 	}
 
 	if finalResponse == nil {
@@ -508,6 +509,53 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 		}
 	}
 	return result, nil
+}
+
+// newOpenAICompatBufferedReadFailoverError 把「上游响应体读到一半断了」的读取错误
+// 升级成 failover 错误。非流式桥接下客户端尚未收到任何字节，切号重试是安全的；
+// 原先直接返回原始错误会退化成通用 502，既不切号也不带稳定错误码。
+//
+// 三种情况保持原样返回：非读取阶段的错误、响应体超限（bufio.ErrTooLong，重放同样会超）、
+// 以及客户端自己取消 / 上下文超时（由 shouldClassifyOpenAIUpstreamStreamReadError 判定）。
+func (s *OpenAIGatewayService) newOpenAICompatBufferedReadFailoverError(
+	c *gin.Context,
+	account *Account,
+	resp *http.Response,
+	requestID string,
+	err error,
+) error {
+	var readErr *openAICompatBufferedReadError
+	if !errors.As(err, &readErr) || readErr == nil || errors.Is(readErr.cause, bufio.ErrTooLong) {
+		return err
+	}
+	var requestContext context.Context
+	if c != nil && c.Request != nil {
+		requestContext = c.Request.Context()
+	}
+	if !shouldClassifyOpenAIUpstreamStreamReadError(readErr.cause, requestContext) {
+		return err
+	}
+
+	classifiedErr := newOpenAIUpstreamStreamReadError(readErr.cause)
+	code, message, ok := OpenAIUpstreamStreamReadErrorDetails(classifiedErr)
+	if !ok {
+		return err
+	}
+	payload, _ := json.Marshal(gin.H{
+		"error": gin.H{
+			"type":    "upstream_error",
+			"code":    code,
+			"message": message,
+		},
+	})
+	var responseHeaders http.Header
+	if resp != nil {
+		responseHeaders = resp.Header
+	}
+	failoverErr := s.newOpenAIStreamFailoverError(c, account, false, requestID, payload, message, responseHeaders)
+	// 保留稳定错误码，确保重试耗尽后客户端和错误透传规则仍能识别传输故障。
+	failoverErr.ResponseBody = payload
+	return failoverErr
 }
 
 // handleChatStreamingResponse reads Responses SSE events from upstream,
