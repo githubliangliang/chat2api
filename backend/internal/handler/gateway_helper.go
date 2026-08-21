@@ -444,3 +444,30 @@ func nextBackoff(current time.Duration) time.Duration {
 	}
 	return jittered
 }
+
+// postForwardBestEffortTimeout bounds the bookkeeping that runs after the
+// upstream response has already been handed to the client.
+const postForwardBestEffortTimeout = 3 * time.Second
+
+// postForwardContext returns a context for best-effort bookkeeping that runs
+// after the upstream response has been delivered — sticky-session binds, RPM
+// counters and the like. Clients (Codex CLI and other CLI callers especially)
+// close the connection as soon as they see the terminal event, so the request
+// context is usually already cancelled by this point; deriving from it would
+// fail every such write and log a warning for a request that actually
+// succeeded. Cancellation is dropped, but the timeout keeps a stalled cache or
+// database from pinning the goroutine.
+//
+// Takes a context rather than the *gin.Context so callers pass whichever ctx
+// the surrounding path already enriched — context values carried on it are
+// preserved, only cancellation is dropped.
+//
+// Only use this after the response is committed. Anything still deciding how to
+// serve the request must keep request cancellation so that a client hanging up
+// stops the work.
+func postForwardContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithTimeout(context.WithoutCancel(ctx), postForwardBestEffortTimeout)
+}

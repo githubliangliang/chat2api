@@ -156,3 +156,36 @@ func BenchmarkWrapReleaseOnDone(b *testing.B) {
 		release()
 	}
 }
+
+type postForwardCtxKey struct{}
+
+// Bookkeeping that runs after the response is committed must survive the client
+// hanging up, but must not outlive the timeout or lose context values the
+// surrounding request path already attached.
+func TestPostForwardContext_DropsCancellationKeepsDeadlineAndValues(t *testing.T) {
+	parent, cancelParent := context.WithCancel(context.Background())
+	parent = context.WithValue(parent, postForwardCtxKey{}, "carried")
+	cancelParent() // 客户端在响应发完后立刻断开
+
+	ctx, cancel := postForwardContext(parent)
+	defer cancel()
+
+	require.NoError(t, ctx.Err(), "父 ctx 已取消不应传导到响应后记账")
+	require.Equal(t, "carried", ctx.Value(postForwardCtxKey{}), "context value 必须保留")
+
+	deadline, ok := ctx.Deadline()
+	require.True(t, ok, "必须带超时，避免卡住的缓存/DB 拖住 goroutine")
+	require.InDelta(t, postForwardBestEffortTimeout, time.Until(deadline), float64(time.Second))
+
+	cancel()
+	require.ErrorIs(t, ctx.Err(), context.Canceled, "自身 cancel 仍应生效")
+}
+
+func TestPostForwardContext_NilParent(t *testing.T) {
+	ctx, cancel := postForwardContext(nil)
+	defer cancel()
+
+	require.NoError(t, ctx.Err())
+	_, ok := ctx.Deadline()
+	require.True(t, ok)
+}

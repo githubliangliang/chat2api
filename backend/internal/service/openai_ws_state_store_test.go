@@ -247,3 +247,67 @@ func TestWithOpenAIWSStateStoreRedisTimeout_WithParentContext(t *testing.T) {
 	_, ok := ctx.Deadline()
 	require.True(t, ok, "应附加短超时")
 }
+
+// openAIWSStateStoreCancelProbeCache records the ctx state each cache call is
+// handed, so the test can tell mirror writes apart from reads.
+type openAIWSStateStoreCancelProbeCache struct {
+	*openAIWSStateStoreTimeoutProbeCache
+	setCalled    bool
+	setCtxErr    error
+	deleteCalled bool
+	deleteCtxErr error
+	getCalled    bool
+	getCtxErr    error
+}
+
+func (c *openAIWSStateStoreCancelProbeCache) SetSessionAccountID(ctx context.Context, _ int64, _ string, _ int64, _ time.Duration) error {
+	c.setCalled = true
+	c.setCtxErr = ctx.Err()
+	return ctx.Err()
+}
+
+func (c *openAIWSStateStoreCancelProbeCache) DeleteSessionAccountID(ctx context.Context, _ int64, _ string) error {
+	c.deleteCalled = true
+	c.deleteCtxErr = ctx.Err()
+	return ctx.Err()
+}
+
+func (c *openAIWSStateStoreCancelProbeCache) GetSessionAccountID(ctx context.Context, _ int64, _ string) (int64, error) {
+	c.getCalled = true
+	c.getCtxErr = ctx.Err()
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	return 123, nil
+}
+
+// Codex-style clients close the connection as soon as the terminal event lands,
+// which cancels the gin request context before the response→account binding is
+// mirrored. The mirror write must not inherit that cancellation; the read must.
+func TestOpenAIWSStateStore_MirrorWritesSurviveRequestCancellation(t *testing.T) {
+	probe := &openAIWSStateStoreCancelProbeCache{
+		openAIWSStateStoreTimeoutProbeCache: &openAIWSStateStoreTimeoutProbeCache{},
+	}
+	store := NewOpenAIWSStateStore(probe)
+	groupID := int64(7)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	require.NoError(t, store.BindResponseAccount(ctx, groupID, "resp_cancelled_bind", 42, time.Minute),
+		"请求取消不应让镜像写入失败")
+	require.True(t, probe.setCalled, "镜像写入必须仍然发生")
+	require.NoError(t, probe.setCtxErr, "镜像写入的 ctx 不应继承请求取消")
+
+	require.NoError(t, store.DeleteResponseAccount(ctx, groupID, "resp_cancelled_bind"),
+		"请求取消不应让镜像删除失败")
+	require.True(t, probe.deleteCalled, "镜像删除必须仍然发生")
+	require.NoError(t, probe.deleteCtxErr, "镜像删除的 ctx 不应继承请求取消")
+
+	// 读路径保持原语义：调用方已经走了，没必要再查 Redis。
+	accountID, err := store.GetResponseAccount(ctx, groupID, "resp_never_bound")
+	require.NoError(t, err, "缓存读取失败按未命中降级")
+	require.Zero(t, accountID)
+	require.True(t, probe.getCalled, "本地未命中应回落到 Redis 读取")
+	require.ErrorIs(t, probe.getCtxErr, context.Canceled, "读路径应继续继承请求取消")
+}

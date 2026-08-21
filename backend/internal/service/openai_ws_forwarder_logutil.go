@@ -517,13 +517,21 @@ func logOpenAIWSBindResponseAccountWarn(groupID, accountID int64, responseID str
 	if err == nil {
 		return
 	}
-	logger.L().Warn(
-		"openai.ws_bind_response_account_failed",
+	fields := []zap.Field{
 		zap.Int64("group_id", groupID),
 		zap.Int64("account_id", accountID),
 		zap.String("response_id", truncateOpenAIWSLogValue(responseID, openAIWSIDValueMaxLen)),
 		zap.Error(err),
-	)
+	}
+	// The binding is already committed to the process-local map by this point; the
+	// cache mirror is best-effort. A cancelled or timed-out mirror write says the
+	// request or Redis went away, not that stickiness broke, so it stays at debug
+	// and only genuine cache failures are surfaced as warnings.
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		logger.L().Debug("openai.ws_bind_response_account_skipped", fields...)
+		return
+	}
+	logger.L().Warn("openai.ws_bind_response_account_failed", fields...)
 }
 
 func summarizeOpenAIWSReadCloseError(err error) (status string, reason string) {

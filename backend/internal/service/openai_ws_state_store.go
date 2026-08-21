@@ -110,7 +110,7 @@ func (s *defaultOpenAIWSStateStore) BindResponseAccount(ctx context.Context, gro
 		return nil
 	}
 	cacheKey := openAIWSResponseAccountCacheKey(id)
-	cacheCtx, cancel := withOpenAIWSStateStoreRedisTimeout(ctx)
+	cacheCtx, cancel := withOpenAIWSStateStoreRedisWriteTimeout(ctx)
 	defer cancel()
 	return s.cache.SetSessionAccountID(cacheCtx, groupID, cacheKey, accountID, ttl)
 }
@@ -161,7 +161,7 @@ func (s *defaultOpenAIWSStateStore) DeleteResponseAccount(ctx context.Context, g
 	if s.cache == nil {
 		return nil
 	}
-	cacheCtx, cancel := withOpenAIWSStateStoreRedisTimeout(ctx)
+	cacheCtx, cancel := withOpenAIWSStateStoreRedisWriteTimeout(ctx)
 	defer cancel()
 	return s.cache.DeleteSessionAccountID(cacheCtx, groupID, openAIWSResponseAccountCacheKey(id))
 }
@@ -444,4 +444,18 @@ func withOpenAIWSStateStoreRedisTimeout(ctx context.Context) (context.Context, c
 		ctx = context.Background()
 	}
 	return context.WithTimeout(ctx, openAIWSStateStoreRedisTimeout)
+}
+
+// withOpenAIWSStateStoreRedisWriteTimeout detaches cancellation before applying the
+// Redis timeout. Response→account bindings are mirrored after the upstream response
+// has been delivered, and clients (Codex CLI in particular) close the connection as
+// soon as they see the terminal event. Deriving straight from the request context
+// would cancel the mirror write every time, leaving the binding process-local only —
+// invisible on a single node, but silently breaking cross-instance stickiness.
+// Reads keep request cancellation: a caller that is gone has no use for the result.
+func withOpenAIWSStateStoreRedisWriteTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithTimeout(context.WithoutCancel(ctx), openAIWSStateStoreRedisTimeout)
 }
