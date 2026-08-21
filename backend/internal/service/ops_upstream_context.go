@@ -51,6 +51,10 @@ const (
 	OpsClientBusinessLimitedReasonAPIKeyGroupUnassigned  = "api_key_group_unassigned"
 	OpsClientBusinessLimitedReasonLocalFeatureGate       = "local_feature_gate"
 	OpsClientBusinessLimitedReasonLocalPolicyDenied      = "local_policy_denied"
+	// OpsClientBusinessLimitedReasonLocalModelConfiguration 标记「分组里没有账号配置了这个模型」
+	// 引发的本地 404。它是配置问题而非上游故障，必须排除出 SLA，并清掉此前失败尝试留下的
+	// 上游归因字段（见 handler.suppressOpsUpstreamAttributionForLocalModelConfiguration）。
+	OpsClientBusinessLimitedReasonLocalModelConfiguration = "local_model_configuration"
 )
 
 func MarkResponseCommitted(c *gin.Context) { c.Set(ResponseCommittedKey, true) }
@@ -91,6 +95,19 @@ func HasOpsClientBusinessLimited(c *gin.Context) bool {
 	}
 	marked, _ := v.(bool)
 	return marked
+}
+
+// OpsClientBusinessLimitedReason 返回 MarkOpsClientBusinessLimited 写入的原因，未标记时返回空串。
+func OpsClientBusinessLimitedReason(c *gin.Context) string {
+	if c == nil {
+		return ""
+	}
+	v, ok := c.Get(OpsClientBusinessLimitedReasonKey)
+	if !ok {
+		return ""
+	}
+	reason, _ := v.(string)
+	return strings.TrimSpace(reason)
 }
 
 // OpsStreamError 描述网关在「响应状态已固化为 200」之后（keepalive ping 或部分数据
