@@ -204,17 +204,19 @@ func TestFailoverOpenAIUpstreamHTTPError_NilContextSkipsTempUnschedulablePolicy(
 			"temp_unschedulable_enabled": true,
 			"temp_unschedulable_rules": []any{map[string]any{
 				"error_code":       float64(http.StatusBadRequest),
-				"keywords":         []any{"servers are currently overloaded"},
+				"keywords":         []any{"custom temporary outage"},
 				"duration_minutes": float64(1),
 			}},
 		},
 	}
-	body := []byte(`{"error":{"message":"Our servers are currently overloaded."}}`)
+	// 换成自定义关键词：容量降载文案现在由 isOpenAICapacityShedMessage 直接识别，
+	// 会先于 temp_unschedulable 规则命中，测不到本用例想验证的 nil-context 路径。
+	body := []byte(`{"error":{"message":"Custom temporary outage."}}`)
 	resp := &http.Response{StatusCode: http.StatusBadRequest, Header: http.Header{}}
 
 	got := svc.failoverOpenAIUpstreamHTTPError(
 		context.Background(), nil, account, resp, body,
-		"Our servers are currently overloaded.", "gpt-5.4",
+		"Custom temporary outage.", "gpt-5.4",
 	)
 
 	require.Nil(t, got)
@@ -2330,7 +2332,8 @@ func TestOpenAIStreamingMissingTerminalEventReturnsIncompleteError(t *testing.T)
 
 	go func() {
 		defer func() { _ = pw.Close() }()
-		_, _ = pw.Write([]byte("data: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"message\"},\"output_index\":0}\n\n"))
+		// 空 message item 不再算客户端输出，改用真正带内容的 delta。
+		_, _ = pw.Write([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\",\"output_index\":0}\n\n"))
 	}()
 
 	_, err := svc.handleStreamingResponse(c.Request.Context(), resp, c, &Account{ID: 1}, time.Now(), "model", "model")
@@ -2362,7 +2365,8 @@ func TestOpenAIStreamingPassthroughMissingTerminalEventReturnsIncompleteError(t 
 
 	go func() {
 		defer func() { _ = pw.Close() }()
-		_, _ = pw.Write([]byte("data: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"message\"},\"output_index\":0}\n\n"))
+		// 空 message item 不再算客户端输出，改用真正带内容的 delta。
+		_, _ = pw.Write([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\",\"output_index\":0}\n\n"))
 	}()
 
 	_, err := svc.handleStreamingResponsePassthrough(c.Request.Context(), resp, c, &Account{ID: 1}, time.Now(), "", "")

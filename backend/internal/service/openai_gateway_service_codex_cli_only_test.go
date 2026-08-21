@@ -287,6 +287,25 @@ func TestIsOpenAITransientProcessingError(t *testing.T) {
 		[]byte(`{"error":{"code":"slow_down","message":"Please retry later."}}`),
 	))
 
+	// 仅有过载文案、没有错误码，且状态码不是 400/503 时也要判为瞬时。
+	require.True(t, isOpenAITransientProcessingError(
+		http.StatusBadRequest,
+		"",
+		[]byte(`{"error":{"message":"Our servers are currently overloaded. Please try again later."}}`),
+	))
+
+	require.True(t, isOpenAITransientProcessingError(
+		http.StatusServiceUnavailable,
+		"Server is overloaded. Please try again later.",
+		nil,
+	))
+
+	require.True(t, isOpenAITransientProcessingError(
+		http.StatusBadGateway,
+		"",
+		[]byte(`{"error":{"message":"Our servers are currently overloaded. Please try again later."}}`),
+	))
+
 	require.True(t, isOpenAITransientProcessingError(
 		http.StatusBadRequest,
 		"",

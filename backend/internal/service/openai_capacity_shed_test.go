@@ -94,11 +94,81 @@ func TestOpenAIStreamErrorFrameDoesNotStartClientOutput(t *testing.T) {
 		{`{"type":"response.failed","response":{"error":{"code":"server_is_overloaded"}}}`, "response.failed", false},
 		{`{"type":"response.created","response":{"id":"resp_1"}}`, "response.created", false},
 		{`{"type":"response.in_progress","response":{"id":"resp_1"}}`, "response.in_progress", false},
+		{`{"type":"response.output_item.added","item":{"type":"reasoning","summary":[]}}`, "response.output_item.added", false},
+		{`{"type":"response.output_item.added","item":{"type":"reasoning","encrypted_content":"ciphertext"}}`, "response.output_item.added", true},
+		{`{"type":"response.reasoning_summary_part.added","part":{"type":"summary_text","text":""}}`, "response.reasoning_summary_part.added", false},
+		{`{"type":"response.reasoning_summary_part.added","part":{"type":"summary_text","text":"thinking"}}`, "response.reasoning_summary_part.added", true},
+		{`{"type":"response.content_part.added","part":{"type":"output_text","text":""}}`, "response.content_part.added", false},
 		{`{"type":"response.output_text.delta","delta":"hi"}`, "response.output_text.delta", true},
 		{`[DONE]`, "", true},
 	}
 	for _, tc := range cases {
 		require.Equal(t, tc.want, openAIStreamDataStartsClientOutput(tc.data, tc.eventType), "data=%s type=%s", tc.data, tc.eventType)
+	}
+}
+
+// 只有文本、没有 server_is_overloaded 错误码的容量降载，且前面全是纯元数据事件：
+// 必须仍在写出任何字节前切号（同账号可重试 + 请求级瞬时）。
+func TestOpenAIStreamMetadataPreambleAndMessageOnlyOverloadFailOver(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	largeMetadata := strings.Repeat("x", 16*1024)
+	stream := strings.Join([]string{
+		"event: response.created",
+		`data: {"type":"response.created","response":{"id":"resp_1","metadata":{"padding":"` + largeMetadata + `"}}}`,
+		"",
+		"event: response.output_item.added",
+		`data: {"type":"response.output_item.added","item":{"type":"reasoning","summary":[]}}`,
+		"",
+		"event: response.reasoning_summary_part.added",
+		`data: {"type":"response.reasoning_summary_part.added","part":{"type":"summary_text","text":""}}`,
+		"",
+		"event: error",
+		`data: {"type":"error","error":{"type":"service_unavailable_error","message":"Our servers are currently overloaded. Please try again later."}}`,
+		"",
+	}, "\n")
+
+	tests := []struct {
+		name string
+		run  func(*OpenAIGatewayService, *gin.Context, *http.Response, *Account) error
+	}{
+		{
+			name: "native",
+			run: func(svc *OpenAIGatewayService, c *gin.Context, resp *http.Response, account *Account) error {
+				_, err := svc.handleStreamingResponse(c.Request.Context(), resp, c, account, time.Now(), "model", "model")
+				return err
+			},
+		},
+		{
+			name: "passthrough",
+			run: func(svc *OpenAIGatewayService, c *gin.Context, resp *http.Response, account *Account) error {
+				_, err := svc.handleStreamingResponsePassthrough(c.Request.Context(), resp, c, account, time.Now(), "model", "model")
+				return err
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}}
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+			resp := &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(stream)),
+				Header:     http.Header{"X-Request-Id": []string{"rid-message-only-overload"}},
+			}
+			account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Name: "acc"}
+
+			err := tt.run(svc, c, resp, account)
+			require.Error(t, err)
+			var failoverErr *UpstreamFailoverError
+			require.ErrorAs(t, err, &failoverErr)
+			require.True(t, failoverErr.RetryableOnSameAccount)
+			require.True(t, failoverErr.RequestScopedTransient)
+			require.False(t, c.Writer.Written())
+			require.Empty(t, rec.Body.String())
+		})
 	}
 }
 
@@ -208,6 +278,18 @@ func TestSanitizeOpenAICapacityShedErrorCodeForClient(t *testing.T) {
 		{
 			name:        "error帧裸code改写",
 			payload:     `{"type":"error","error":{"code":"slow_down","message":"slow down"}}`,
+			wantChanged: true,
+			wantContain: `"code":"server_error"`,
+		},
+		{
+			name:        "failed事件只有过载文案时补充code",
+			payload:     `{"type":"response.failed","response":{"error":{"message":"Our servers are currently overloaded. Please try again later."}}}`,
+			wantChanged: true,
+			wantContain: `"code":"server_error"`,
+		},
+		{
+			name:        "error帧只有过载文案时补充code",
+			payload:     `{"type":"error","error":{"message":"Server is overloaded. Please try again later."}}`,
 			wantChanged: true,
 			wantContain: `"code":"server_error"`,
 		},

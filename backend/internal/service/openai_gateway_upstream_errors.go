@@ -117,7 +117,7 @@ func isOpenAIInstructionsRequiredError(upstreamStatusCode int, upstreamMsg strin
 }
 
 func isOpenAITransientProcessingError(upstreamStatusCode int, upstreamMsg string, upstreamBody []byte) bool {
-	if upstreamStatusCode != http.StatusBadRequest && upstreamStatusCode != http.StatusServiceUnavailable {
+	if upstreamStatusCode < http.StatusBadRequest {
 		return false
 	}
 
@@ -132,6 +132,14 @@ func isOpenAITransientProcessingError(upstreamStatusCode int, upstreamMsg string
 	if len(upstreamBody) > 0 && hasOpenAIServerOverloadedCode(upstreamBody) {
 		return true
 	}
+	// 容量降载有时只以文本消息返回，不带 server_is_overloaded 错误码。
+	if isOpenAICapacityShedMessage(upstreamMsg) ||
+		isOpenAICapacityShedMessage(gjson.GetBytes(upstreamBody, "error.message").String()) ||
+		isOpenAICapacityShedMessage(gjson.GetBytes(upstreamBody, "response.error.message").String()) ||
+		isOpenAICapacityShedMessage(string(upstreamBody)) {
+		return true
+	}
+	// 以下文本匹配只对 400 成立；上游对其他状态码的措辞不保证同义。
 	if upstreamStatusCode != http.StatusBadRequest {
 		return false
 	}
@@ -162,6 +170,21 @@ func isOpenAITransientProcessingError(upstreamStatusCode int, upstreamMsg string
 		return true
 	}
 	return match(string(upstreamBody))
+}
+
+func isOpenAICapacityShedMessage(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	return strings.Contains(lower, "server is overloaded") ||
+		strings.Contains(lower, "servers are overloaded") ||
+		strings.Contains(lower, "servers are currently overloaded")
+}
+
+// isOpenAIRequestScopedCapacityShed 判定"上游按本次请求降载"，而不是账号出了问题。
+// 这类失败应当同账号重试，且不得据此把账号标成临时不可调度。
+func isOpenAIRequestScopedCapacityShed(upstreamMsg string, upstreamBody []byte) bool {
+	return isOpenAIUpstreamCapacityShedEvent(upstreamBody) ||
+		isOpenAICapacityShedMessage(upstreamMsg) ||
+		isOpenAICapacityShedMessage(string(upstreamBody))
 }
 
 func isOpenAIContextWindowError(upstreamMsg string, upstreamBody []byte) bool {
@@ -248,14 +271,17 @@ func newOpenAIUpstreamFailoverError(
 	upstreamMsg string,
 	retryableOnSameAccount bool,
 ) *UpstreamFailoverError {
+	requestScopedCapacity := isOpenAIRequestScopedCapacityShed(upstreamMsg, responseBody)
 	failoverErr := &UpstreamFailoverError{
 		StatusCode:             statusCode,
 		ResponseBody:           responseBody,
 		ResponseHeaders:        responseHeaders.Clone(),
-		RetryableOnSameAccount: retryableOnSameAccount,
+		RetryableOnSameAccount: retryableOnSameAccount || requestScopedCapacity,
+		RequestScopedTransient: requestScopedCapacity,
 	}
 	if isOpenAIRequestBodyTooLargeError(statusCode, upstreamMsg, responseBody) {
 		failoverErr.RetryableOnSameAccount = false
+		failoverErr.RequestScopedTransient = false
 		failoverErr.Scope = GatewayFailureScopeAccount
 		failoverErr.Reason = openAIRequestBodyTooLargeReason
 		failoverErr.NextAccountAction = NextAccountRetry
