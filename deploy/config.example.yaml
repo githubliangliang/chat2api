@@ -937,6 +937,14 @@ database:
   # SQLite file path
   # SQLite 文件路径
   path: "./data/sub2api.db"
+  # Commit durability under WAL: off | normal | full | extra. Default normal.
+  # normal cannot corrupt the database and survives application crashes; only an
+  # OS crash or power loss can drop the most recent commits. full fsyncs on every
+  # commit, which dominates write latency on slow disks.
+  # WAL 下的提交耐久度：off | normal | full | extra，默认 normal。
+  # normal 不会损坏数据库，进程崩溃也不丢数据；只有操作系统崩溃/断电才可能丢失
+  # 最近几个已提交事务。full 每次提交都 fsync，在慢盘上会成为写入瓶颈。
+  synchronous: "normal"
   # Max open connections. SQLite should stay small (for example 4).
   # 最大打开连接数。SQLite 建议保持较小值（例如 4）
   max_open_conns: 4

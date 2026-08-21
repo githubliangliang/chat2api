@@ -1426,13 +1426,17 @@ type DatabaseConfig struct {
 	// Driver is normalized to sqlite, including legacy values.
 	Driver string `mapstructure:"driver"`
 	// Path: SQLite 数据库文件路径（driver=sqlite 时使用），例如 ./data/sub2api.db
-	Path     string `mapstructure:"path"`
-	Host     string `mapstructure:"host"`
-	Port     int    `mapstructure:"port"`
-	User     string `mapstructure:"user"`
-	Password string `mapstructure:"password"`
-	DBName   string `mapstructure:"dbname"`
-	SSLMode  string `mapstructure:"sslmode"`
+	Path string `mapstructure:"path"`
+	// Synchronous: SQLite PRAGMA synchronous（off|normal|full|extra），默认 normal。
+	// WAL 下 normal 不会损坏库、进程崩溃也不丢数据，仅在操作系统崩溃/断电时可能
+	// 丢失最近几个已提交事务；full 则每次提交都 fsync，在慢盘 VPS 上是写入瓶颈。
+	Synchronous string `mapstructure:"synchronous"`
+	Host        string `mapstructure:"host"`
+	Port        int    `mapstructure:"port"`
+	User        string `mapstructure:"user"`
+	Password    string `mapstructure:"password"`
+	DBName      string `mapstructure:"dbname"`
+	SSLMode     string `mapstructure:"sslmode"`
 	// 连接池配置（性能优化：可配置化连接池参数）
 	// MaxOpenConns: 最大打开连接数，控制数据库连接上限，防止资源耗尽
 	MaxOpenConns int `mapstructure:"max_open_conns"`
@@ -1481,15 +1485,55 @@ func (d *DatabaseConfig) DSNWithTimezone(tz string) string {
 
 // sqliteDSN builds a modernc.org/sqlite DSN with pragmas suitable for concurrent app use.
 func (d *DatabaseConfig) sqliteDSN(tz string) string {
-	path := d.SQLitePath()
-	// file: DSN keeps path portable; enable foreign keys and a busy timeout for multi-connection safety.
-	// _time_format=sqlite: write time.Time in SQLite-friendly form so DATETIME columns scan back.
-	dsn := fmt.Sprintf("file:%s?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_time_format=sqlite", path)
 	if tz != "" {
 		// SQLite does not apply session TimeZone like Postgres; keep for documentation/consistency.
 		_ = tz
 	}
-	return dsn
+	return BuildSQLiteDSN(d.SQLitePath(), d.Synchronous)
+}
+
+// SQLiteSynchronousNormal is the default durability mode for this fork.
+const SQLiteSynchronousNormal = "normal"
+
+// sqliteSynchronousPragma maps a configured mode to its PRAGMA synchronous value.
+var sqliteSynchronousPragma = map[string]string{
+	"off":    "0",
+	"normal": "1",
+	"full":   "2",
+	"extra":  "3",
+}
+
+// NormalizeSQLiteSynchronous resolves a configured synchronous mode, falling back
+// to NORMAL when unset or unrecognized.
+func NormalizeSQLiteSynchronous(mode string) string {
+	normalized := strings.ToLower(strings.TrimSpace(mode))
+	if _, ok := sqliteSynchronousPragma[normalized]; !ok {
+		return SQLiteSynchronousNormal
+	}
+	return normalized
+}
+
+// BuildSQLiteDSN is the single source of truth for the application's SQLite DSN.
+// The runtime driver, the migration runner and the setup wizard all go through
+// here: a pragma set that differs between them silently gives the setup path
+// different durability or timestamp handling than the server that follows it.
+//
+// synchronous defaults to NORMAL. Under WAL that is the documented safe choice —
+// it cannot corrupt the database and survives application crashes; only an OS
+// crash or power loss can drop the most recent commits. FULL fsyncs on every
+// commit instead, which on a small VPS (measured ~5.8ms per fsync) dominates
+// write latency while the single SQLite writer lock is held. Set
+// database.synchronous: full to trade that back for per-commit durability.
+func BuildSQLiteDSN(path, synchronous string) string {
+	if strings.TrimSpace(path) == "" {
+		path = "./data/sub2api.db"
+	}
+	// _time_format=sqlite: write time.Time in SQLite-friendly form so DATETIME columns scan back.
+	return fmt.Sprintf(
+		"file:%s?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(%s)&_time_format=sqlite",
+		path,
+		sqliteSynchronousPragma[NormalizeSQLiteSynchronous(synchronous)],
+	)
 }
 
 // RedisConfig Redis 连接配置
@@ -2094,6 +2138,7 @@ func setDefaults() {
 	// Database
 	viper.SetDefault("database.driver", DatabaseDriverSQLite)
 	viper.SetDefault("database.path", "./data/sub2api.db")
+	viper.SetDefault("database.synchronous", SQLiteSynchronousNormal)
 	viper.SetDefault("database.host", "localhost")
 	viper.SetDefault("database.port", 5432)
 	viper.SetDefault("database.user", "")

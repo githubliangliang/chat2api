@@ -120,7 +120,7 @@ func openSQLiteDriver(cfg *config.Config) (*entsql.Driver, error) {
 	// Register PG-shaped helpers (NOW/GREATEST/LEAST) before opening connections.
 	registerSQLitePGCompatFunctions()
 
-	dsn := fmt.Sprintf("file:%s?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_time_format=sqlite", path)
+	dsn := cfg.Database.DSN()
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)

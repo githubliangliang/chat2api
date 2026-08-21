@@ -21,6 +21,11 @@ server:
 database:
   driver: "sqlite"
   path: "/opt/sub2api/data/sub2api.db"
+  # WAL 下的提交耐久度。normal（默认）不会损坏数据库，进程崩溃也不丢数据，
+  # 只有操作系统崩溃/断电才可能丢掉最近几个已提交事务。
+  # full 则每次提交都 fsync；慢盘 VPS 上实测单次 fsync 约 5.8ms，且是在持有
+  # SQLite 单写者锁时付出的，直接压住写入吞吐。要按事务级耐久度换性能就改 full。
+  synchronous: "normal"
   max_open_conns: 2
   max_idle_conns: 2
   conn_max_lifetime_minutes: 30

@@ -15,6 +15,12 @@ Environment=DATA_DIR=/opt/sub2api/data
 Environment=GIN_MODE=release
 Environment=SERVER_HOST=0.0.0.0
 Environment=SERVER_PORT=8080
+# Go 堆软上限。嵌入式 Redis（redis.enabled=false）把全部缓存放在同一个 Go 堆里，
+# 而 1C1G 机器通常没有 swap——堆一涨就是内核 OOM kill，且 Restart=always 会静默
+# 拉起，连带清空 miniredis 里的缓存/并发槽位/调度快照，表现为"偶尔卡一下"。
+# 设了它 Go 会在逼近时加大 GC 力度而不是等着被杀。软限制，不会杀进程。
+# 参考值按实测峰值定：观测到 RSS 峰值约 163MB 时取 450MiB（约 2.7x 余量）。
+Environment=GOMEMLIMIT=450MiB
 # 已完成安装后不要开 AUTO_SETUP；首次可用手动环境变量安装
 
 ExecStart=/opt/sub2api/sub2api
@@ -31,8 +37,10 @@ ProtectHome=true
 PrivateTmp=true
 ReadWritePaths=/opt/sub2api/data
 
-# 1C1G 可按需打开内存上限（单位字节，约 768MB）
-# MemoryMax=768M
+# 1C1G 硬上限：GOMEMLIMIT 之上再加一道 cgroup 兜底。它只在真正失控时触发，
+# 作用是把爆炸半径关在本服务内——否则内核 OOM killer 可能挑中同机的其它进程。
+# 需要 cgroup v2 且 memory controller 已委派（user 级 unit 亦可）。
+MemoryMax=650M
 
 [Install]
 WantedBy=multi-user.target

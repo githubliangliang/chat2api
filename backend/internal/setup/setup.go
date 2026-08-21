@@ -90,6 +90,10 @@ type DatabaseConfig struct {
 	Driver string `json:"driver" yaml:"driver"`
 	// Path: SQLite database file path.
 	Path string `json:"path" yaml:"path"`
+	// Synchronous mirrors config.DatabaseConfig.Synchronous so the wizard opens
+	// the file with the same durability mode the server will use. Empty means
+	// NORMAL, matching the runtime default.
+	Synchronous string `json:"synchronous,omitempty" yaml:"synchronous,omitempty"`
 	// Host/Port/User/Password/DBName/SSLMode are ignored leftovers kept so
 	// older setup JSON / YAML still unmarshals.
 	Host     string `json:"host,omitempty" yaml:"host,omitempty"`
@@ -211,8 +215,10 @@ func NeedsSetup() bool {
 }
 
 func buildSQLiteDSN(cfg *DatabaseConfig) string {
-	path := cfg.SQLitePath()
-	return fmt.Sprintf("file:%s?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_time_format=sqlite", path)
+	// Share the runtime builder so the wizard writes with the same pragmas the
+	// server will later read with; a divergence here is invisible until the
+	// first mismatched DATETIME scan or an unexpected durability change.
+	return config.BuildSQLiteDSN(cfg.SQLitePath(), cfg.Synchronous)
 }
 
 // TestDatabaseConnection tests the database connection and creates database if not exists
