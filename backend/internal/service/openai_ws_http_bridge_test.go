@@ -204,18 +204,13 @@ func TestProxyOpenAIWSHTTPBridgeTurnSSEErrorFailoverSafety(t *testing.T) {
 				},
 			)
 
+			// 429 现在在任何 turn 都要在写出前切号：限流是账号级的，
+			// 换个账号仍可能成功，而此时客户端还没收到任何字节。
 			var failoverErr *UpstreamFailoverError
-			if turn == 1 {
-				require.Nil(t, result)
-				require.ErrorAs(t, err, &failoverErr)
-				require.Equal(t, http.StatusTooManyRequests, failoverErr.StatusCode)
-				require.Empty(t, writes)
-			} else {
-				require.NotNil(t, result)
-				require.Error(t, err)
-				require.False(t, errors.As(err, &failoverErr))
-				require.Len(t, writes, 1)
-			}
+			require.Nil(t, result)
+			require.ErrorAs(t, err, &failoverErr)
+			require.Equal(t, http.StatusTooManyRequests, failoverErr.StatusCode)
+			require.Empty(t, writes)
 		})
 	}
 }

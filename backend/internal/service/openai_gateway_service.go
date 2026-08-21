@@ -289,6 +289,11 @@ type OpenAIForwardResult struct {
 
 	wsReplayInput       []json.RawMessage
 	wsReplayInputExists bool
+	// wsAccountFailoverReplayInput carries every output item of the turn, not
+	// just the tool-call subset wsReplayInput keeps. Switching accounts mid
+	// conversation means the replacement upstream has none of the session
+	// context, so the whole turn has to be rebuilt into the retry payload.
+	wsAccountFailoverReplayInput []json.RawMessage
 }
 
 // SucceededForScheduling reports whether this result is an upstream success
