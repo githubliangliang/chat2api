@@ -131,7 +131,15 @@ func openSQLiteDriver(cfg *config.Config) (*entsql.Driver, error) {
 	} else {
 		db.SetMaxOpenConns(1)
 	}
-	logger.LegacyPrintf("repository", "using SQLite database at %s", path)
+	// synchronous and foreign_keys are per-connection, not stored in the file, so
+	// no external tool can read back what this process actually opened with.
+	// Report the effective durability mode here or it is unverifiable in production.
+	var effectiveSync string
+	if err := db.QueryRow("PRAGMA synchronous").Scan(&effectiveSync); err != nil {
+		effectiveSync = "unknown"
+	}
+	logger.LegacyPrintf("repository", "using SQLite database at %s (synchronous=%s [%s], max_open_conns=%d)",
+		path, config.NormalizeSQLiteSynchronous(cfg.Database.Synchronous), effectiveSync, cfg.Database.MaxOpenConns)
 	return entsql.OpenDB(dialect.SQLite, db), nil
 }
 
