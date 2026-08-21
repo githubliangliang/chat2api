@@ -499,6 +499,24 @@ func grokChatResponsesRuntimeEligible(upstreamModel, cacheIdentity string) bool 
 	return strings.TrimSpace(upstreamModel) == "grok-4.5" && strings.TrimSpace(cacheIdentity) != ""
 }
 
+// grokChatImageBridgeModel reports whether an inline-image Chat request on this
+// upstream model has to go through the Responses bridge. The raw Chat path
+// cannot forward image_url parts to Grok's native vision, so falling back there
+// silently drops the image.
+//
+// Composer is deliberately excluded: it has its own Composer-to-Build
+// description bridge further down this file. The list covers the mainline
+// vision text models only; upstreamModel is already canonical at this point,
+// so the -latest aliases are covered too.
+func grokChatImageBridgeModel(upstreamModel string) bool {
+	switch strings.ToLower(strings.TrimSpace(upstreamModel)) {
+	case "grok-4.5", "grok-4.6":
+		return true
+	default:
+		return false
+	}
+}
+
 // forwardGrokChatCompletionsViaResponses converts a strictly compatible Chat
 // request into xAI Responses format and reuses the established Responses-to-
 // Chat response translators. It intentionally does not run the Codex OAuth
@@ -527,7 +545,7 @@ func (s *OpenAIGatewayService) forwardGrokChatCompletionsViaResponses(
 	// for non-composer models, so they would be silently dropped. Route them to
 	// Responses even when no prompt-cache identity is available.
 	hasImageInput := openAIJSONValueMayContainImageInput(gjson.GetBytes(body, "messages"))
-	if !grokChatResponsesRuntimeEligible(upstreamModel, cacheIdentity) && (!hasImageInput || strings.TrimSpace(upstreamModel) != "grok-4.5") {
+	if !grokChatResponsesRuntimeEligible(upstreamModel, cacheIdentity) && (!hasImageInput || !grokChatImageBridgeModel(upstreamModel)) {
 		return s.forwardAsRawChatCompletions(ctx, c, account, body, defaultMappedModel)
 	}
 
