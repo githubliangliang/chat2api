@@ -234,9 +234,9 @@ OK    select a, sum(case when b='p' then n else 0 end) from t group by a -> 2 ro
 
 | 上游 commit | 内容 | 规模 | 判断 |
 |---|---|---|---|
-| `58e147fba`（#5816） | Composite 分组支持 Codex 端点（含 Alpha Search 与 Live） | 12 文件 +216-28 | **用 composite 组跑 Codex CLI 就值得。** 本仓库有 composite，`routes/gateway.go:361` 的 `codexDirect` 已挂 `compositeTarget`。上游改的是 ① `modelsHandler` 带 `client_version` 时 Composite 也走 `CodexModels`；② `compositeJSONRequestModel` 额外认 `session.model` 路径（Live/realtime 用）；③ multipart 认 `session` 字段。**patch 里 `countTokensHandler` 那一跳带 Kimi/Zhipu/Deepseek 常量，要剔掉** |
+| `58e147fba`（#5816） | Composite 分组支持 Codex 端点（含 Alpha Search 与 Live） | 12 文件 +216-28 | **已移植（2026-08-22）。** `client_version` 模型清单、JSON `session.model`、multipart `session`、Alpha Search/Live 的 Responses 路由分类均已接入；Composite 的 Alpha Search/Live 只允许解析到 OpenAI 的模型。未带入 Kimi/Zhipu/DeepSeek 分支。 |
 | `b0464a986` + `ec5a34593` + `1ab325678` + `d5484866f`（#5834） | 代理连通性探测目标可配置（有序列表 + 按目标解析） | 4 文件 +100-5 | 小而实用。本仓库 `internal/repository/proxy_probe_service.go:49` 还是硬编码 `probeURLs`。国内网络下能换探测目标。要同步 `deploy/config.example.yaml`，并考虑要不要进 `deploy/config.personal.sqlite.yaml` |
-| `bfac49fef`（#5810） | `POST /v1/responses/input_tokens` 预检 | 10 文件 +479-17 | 纯新端点，Codex CLI 会调。本仓库 `handler/` 与 `service/` 两侧的 `openai_gateway_count_tokens.go` 都在。风险低但非必需 |
+| `bfac49fef`（#5810） | `POST /v1/responses/input_tokens` 预检 | 10 文件 +479-17 | **已移植（2026-08-22）。** 支持 `/v1/responses/input_tokens`、`/responses/input_tokens`、`/backend-api/codex/responses/input_tokens`；官方 OpenAI 可转发，自定义 relay、Grok 或上游不支持时走本地估算，并纳入 count-token ops 分类。 |
 | `1f2a87adb`（#5875） | 补全管理端平台筛选 + 抽共享 `frontend/src/constants/platforms.ts` | 11 文件 +148-62 | **思路借鉴，不整包合。** 上游目录含三个本 fork 没有的平台；本 fork 另有 hidden menu / simple mode 过滤。可以自己抽一个只含 6 平台的目录 |
 | `63839f193`（#5838） | 管理端用户角色选择器样式 | 前端小改 | 可选。本仓库有 `frontend/src/views/admin/UsersView.vue` |
 
