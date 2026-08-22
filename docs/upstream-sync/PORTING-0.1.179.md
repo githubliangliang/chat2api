@@ -1,7 +1,7 @@
 # 移植清单：上游 v0.1.179
 
-对照日期：2026-08-21。本文所有「本仓库现状」结论均在 `665a959` 上逐条 grep / 实测核实，行号以该提交为准。
-合完一项就把状态改成「已合」。**第 4 节 P0 五条已于 2026-08-21 全部合入**（记录见 4.6），其余待合。
+对照日期：2026-08-22。初始「本仓库现状」结论均在 `665a959` 上逐条 grep / 实测核实；P1 状态已按当前 `bce2492` 的实现复核。
+合完一项就把状态改成「已合」。**第 4 节 P0 五条已于 2026-08-21 全部合入**（记录见 4.6）；第 5 节 P1 的 5.1–5.4 已合，5.5 按需跳过。
 
 通用流程见 [README.md](./README.md)，上一轮清单见 [PORTING-0.1.176.md](./PORTING-0.1.176.md)（标题写 0.1.177，P0–P3 已全合）。
 
@@ -48,12 +48,13 @@
 ## 3. 建议顺序
 
 ```text
-① P0 四条 + 清 Sora            已合（2026-08-21）
-② WS 两条（82cbe6aff → b94e484e2）
-③ Grok 两组（内联图片 → tool_search；后者必须排在 ② 之后）
-④ OpenAI 容量过载两条
-⑤ 内置价卡补充（先核官方价，别抄倍率结构）
-⑥ 按需：composite-codex / 代理探测目标 / input_tokens 预检
+① P0 五条 + 清 Sora            已合（2026-08-21）
+② WS 两条（82cbe6aff → b94e484e2） 已合（793fa50 / 8528c43）
+③ Grok 两组（内联图片 → tool_search） 已合（1f2891d / bce2492）
+④ OpenAI 容量过载两条          已合（717bd1c / bc9d9e4）
+⑤ Responses→Chat reasoning 回注 已合（1ecb710）
+⑥ 内置价卡补充                  跳过（本轮不做）
+⑦ 按需：composite-codex / 代理探测目标 / input_tokens 预检
 ```
 
 第 9 节的「长上下文计费门控 AND → OR」是**破坏性变更**，独立决策，不排在流程里。
@@ -153,14 +154,14 @@ cd .. && make test-frontend-critical
 
 ### 5.1 Responses WebSocket http_bridge 两条
 
-状态：**待合**。两条动同一个文件，必须一起做、按顺序。
+状态：**已合**（本仓库提交 `793fa50`、`8528c43`）。两条动同一个文件，已按顺序完成。
 
 | 上游 commit | 内容 | 规模 |
 |---|---|---|
 | `82cbe6aff`（#5845） | 后续轮次遇上游 429 无法切账号 | 9 文件 +461-20 |
 | `b94e484e2`（#5822） | 多轮会话丢失首轮客户端工具映射 + item id 不被上游接受 | 5 文件 +286-6 |
 
-**本仓库确实有 429 这个 bug**：`internal/service/openai_ws_http_bridge.go` 的 254 / 257 / 422 行都是 `turn == 1 && shouldFailover`，第二轮起 failover 分支根本进不去。
+**初始核查确认本仓库存在 429 这个 bug**：`internal/service/openai_ws_http_bridge.go` 的 254 / 257 / 422 行曾都是 `turn == 1 && shouldFailover`，第二轮起 failover 分支根本进不去；现已由上述提交修复。
 
 涉及文件本仓库全有：`openai_ws_http_bridge.go`、`openai_ws_forwarder.go`、`openai_ws_forwarder_ingress.go`、`openai_ws_forwarder_payload.go`、`openai_gateway_service.go`、`handler/openai_gateway_handler.go`、`pkg/apicompat/responses_client_tools.go`、`openai_gateway_grok_tool_protocol.go`。
 
@@ -168,30 +169,30 @@ cd .. && make test-frontend-critical
 
 ### 5.2 Grok 内联图片 / tool_search 两组
 
-状态：**待合**。**必须排在 5.1 之后**——`9ede0f716` 动 `openai_ws_http_bridge.go` +52-13，先做会撞。
+状态：**已合**（本仓库提交 `1f2891d`、`bce2492`）。已按要求排在 5.1 之后。
 
 | 上游 commit | 内容 | 规模 | 备注 |
 |---|---|---|---|
-| `99a8b8470` + `b0cdea303`（#5844） | 内联图片与客户端 `view_image` 工具冲突，模型只回行动预告不识别图片 | 5 文件 +442-0 | 纯新增无删除。新建 `openai_gateway_grok_chat_image_tools.go`。本仓库只在 `openai_gateway_grok_cache.go:505` 有一句 view_image 注释 |
-| `9ede0f716` + `5b2089c5a`（#5881 / #5868） | `tool_search_output` 未按标准 `function_call_output` 下发；搜索发现结果未提升为可调用工具 | 10 文件 | 需新建 `pkg/apicompat/responses_tool_search_discoveries.go`（263 行，本仓库无）。本仓库 `responses_client_tools.go:172` 已有 `case "tool_search_output"` 分支，是改不是加 |
+| `99a8b8470` + `b0cdea303`（#5844） | 内联图片与客户端 `view_image` 工具冲突，模型只回行动预告不识别图片 | 5 文件 +442-0 | 纯新增无删除。已新建 `openai_gateway_grok_chat_image_tools.go`；原先本仓库只有 `openai_gateway_grok_cache.go:505` 的一处注释 |
+| `9ede0f716` + `5b2089c5a`（#5881 / #5868） | `tool_search_output` 未按标准 `function_call_output` 下发；搜索发现结果未提升为可调用工具 | 10 文件 | 已新增 `pkg/apicompat/responses_tool_search_discoveries.go`，并修改 `responses_client_tools.go` 的 `case "tool_search_output"` 分支 |
 
 ### 5.3 OpenAI 容量过载仅以文本消息返回时未被识别
 
-上游 `c3063e01a` + `539064798`（PR #5676），19 文件 +625-90。状态：**待合**
+上游 `c3063e01a` + `539064798`（PR #5676），19 文件 +625-90。状态：**已合**（本仓库提交 `717bd1c`、`bc9d9e4`）
 
 目标文件本仓库全有，含 `openai_capacity_shed_test.go`、`openai_compact_sse_keepalive.go`、`openai_account_runtime_block_fastpath.go`。纯 OpenAI 侧稳定性，无迁移、无接口变更。
 
 ### 5.4 Responses→Chat 桥接 encrypted-only reasoning 回注
 
-上游 `612436a5a`（#5729）+ `401dd43b4`，17 文件 +665-12。状态：**待合，优先级低**
+上游 `612436a5a`（#5729）+ `401dd43b4`，17 文件 +665-12。状态：**已合**（本仓库提交 `1ecb710`）
 
-⚠️ **动了 `internal/repository/gateway_cache.go`（+42）和 `internal/service/gateway_service.go`（+14），并给 `internal/testutil/stubs.go` 加接口方法** → 触发 DEV_GUIDE 坑 6（改 interface 要改所有 stub/mock），上游自己就顺带改了 8 个测试文件各 +7 行。缓存走 Redis 接口，本 fork 的 miniredis 能跑。
+⚠️ **本项动了 `internal/repository/gateway_cache.go`（+42）和 `internal/service/gateway_service.go`（+14），并给 `internal/testutil/stubs.go` 加接口方法** → 已同步更新所有受影响 stub/mock 和测试。缓存走 Redis 接口，本 fork 的 miniredis 测试已通过。
 
-上游举的例子是 DeepSeek thinking 持续 400（本 fork 没有 DeepSeek 平台）。对本仓库受益的是走 Responses→Chat 回落的 upstream 透传账号。**不用这条路径就先别合。**
+上游举的例子是 DeepSeek thinking 持续 400（本 fork 没有 DeepSeek 平台）。对本仓库受益的是走 Responses→Chat 回落的 upstream 透传账号；当前实现已覆盖该回落路径。
 
 ### 5.5 内置价卡补充
 
-状态：**待合**。只抄价卡，不抄倍率。
+状态：**跳过**（本轮按要求不做）。只抄价卡，不抄倍率。
 
 本仓库现状是别名链：
 
