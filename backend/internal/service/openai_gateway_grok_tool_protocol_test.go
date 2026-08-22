@@ -516,3 +516,31 @@ func requireGrokProtocolFrame(t *testing.T, frames []grokProtocolSSEFrame, event
 	t.Fatalf("missing SSE frame event=%q %s=%q", eventType, path, value)
 	return grokProtocolSSEFrame{}
 }
+
+// tool_search_output 缺 call_id 时必须在发出请求前返回 400，而不是把一条
+// 上游无法解析的 function_call_output 送出去。
+func TestForwardGrokResponsesMalformedToolSearchOutputReturns400BeforeUpstream(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	body := []byte(`{
+		"model":"grok","stream":false,
+		"tools":[{"type":"tool_search"}],
+		"input":[{"type":"tool_search_output","status":"completed"}]
+	}`)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	upstream := &httpUpstreamRecorder{}
+	svc := &OpenAIGatewayService{httpUpstream: upstream}
+	account := grokProtocolAPIKeyAccount(7103)
+
+	result, err := svc.forwardGrokResponses(context.Background(), c, account, body, "grok", false, time.Now())
+
+	require.Error(t, err)
+	require.Nil(t, result)
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Equal(t, "invalid_request_error", gjson.Get(recorder.Body.String(), "error.type").String())
+	require.Equal(t, "tools", gjson.Get(recorder.Body.String(), "error.param").String())
+	require.Contains(t, gjson.Get(recorder.Body.String(), "error.message").String(), "call_id")
+	require.Empty(t, upstream.requests, "malformed lowered output must not reach xAI")
+}
