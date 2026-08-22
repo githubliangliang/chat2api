@@ -32,10 +32,11 @@ docker compose -f docker-compose.sqlite.yml --env-file .env.sqlite logs -f
 
 | 项 | 值 | 作用 |
 |----|-----|------|
-| `run_mode` | `simple` | 弱化 SaaS 计费 |
+| `run_mode` | `standard` | 完整分组/计费语义（推荐）；菜单用 `/admin/menu` 隐藏，详见根 README |
+| `default.user_balance` | `100000` | standard 会校验余额，留 0 则调 API 报 403 |
 | `database.driver` | `sqlite` | 不跑 PG |
 | `redis.enabled` | `false` | 嵌入式 Redis，单机 |
-| `ops.enabled` | `false` | 关运维采集 |
+| `ops.enabled` | `true` | 开错误/系统日志 + 每天 03:00 清理；聚合与采集缓存仍关 |
 | `batch_image` | 关闭 | 关生图队列 |
 | 连接池 | 2 | 少占连接 |
 
@@ -124,15 +125,9 @@ deploy/deploy-remote.sh                          # 之后每次发布都不用�
 
 ---
 
-## 建议系统
+## 备份
 
-```bash
-# 1C1G 建议开 swap
-sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile
-sudo mkswap /swapfile && sudo swapon /swapfile
-```
-
-备份：整目录 `/opt/sub2api/data`（含 `sub2api.db`、`config.yaml`）。
+整目录 `/opt/sub2api/data`（含 `sub2api.db`、`config.yaml`）。
 
 ---
 

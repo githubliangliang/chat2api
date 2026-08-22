@@ -4,8 +4,10 @@
 # 修改 jwt.secret、admin 密码后再启动
 # =============================================================================
 
-# simple：弱化 SaaS 计费/分组等，个人自用更合适
-run_mode: "simple"
+# standard（推荐）：分组隔离、用量扣费、用量/审计页面都完整可用。
+# simple 会跳过计费**并且忽略分组调度**（分组配置填了也不生效），只在完全不看账时才用。
+# 觉得菜单太多不必降级：用管理页「菜单管理」(/admin/menu) 逐项隐藏。
+run_mode: "standard"
 
 server:
   host: "0.0.0.0"
@@ -79,8 +81,11 @@ timezone: "Asia/Shanghai"
 default:
   admin_email: "admin@example.com"
   admin_password: "CHANGE_ME_STRONG_PASSWORD"
-  user_concurrency: 3
-  user_balance: 0
+  user_concurrency: 10
+  # 管理员（以及新注册用户）的初始余额。standard 模式会校验余额：
+  # 留 0 则首次调 API 直接 403 INSUFFICIENT_BALANCE。
+  # 要开放注册就改回 0，再到 /admin/users 单独给自己充。
+  user_balance: 100000
   api_key_prefix: "sk-"
   rate_multiplier: 1.0
 

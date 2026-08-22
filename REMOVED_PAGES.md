@@ -46,7 +46,8 @@ handler 代码仍保留，仅下线路由。
 
 见 `deploy/config.personal.sqlite.yaml` 与 `deploy/START_NATIVE.md`：
 
-- `run_mode: simple`
+- `run_mode: standard`（推荐；`simple` 会连分组调度一起跳过，理由见根 README「run_mode」一节）
+- `default.user_balance: 100000`（standard 会校验余额）
 - `redis.enabled: false`
-- `ops.enabled: false`
+- `ops.enabled: true`（仅错误/系统日志 + 定时清理；`aggregation`、采集缓存、预聚合表仍关）
 - `batch_image.enabled: false`
